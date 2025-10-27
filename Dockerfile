@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev python3-venv \
     build-essential libffi-dev libssl-dev \
     ffmpeg \
-    supervisor nginx \
+    supervisor nginx unzip \
     xvfb libfuse2t64 \
     libglib2.0-0 libnspr4 libnss3 libatk1.0-0 libatspi2.0-0 \
     libgtk-3-0 libgdk-pixbuf-2.0-0 libpango-1.0-0 libcairo2 \
@@ -41,6 +41,12 @@ RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 # 克隆 AstrBot 源码
 RUN git clone https://github.com/AstrBotDevs/AstrBot.git /home/user/AstrBot && \
     chown -R 1000:1000 /home/user/AstrBot
+
+# 预下载 AstrBot WebUI 静态资源，避免运行时网络下载失败
+RUN mkdir -p /home/user/AstrBot/data && chown -R 1000:1000 /home/user/AstrBot/data
+ADD --chown=1000:1000 https://github.com/AstrBotDevs/AstrBot/releases/latest/download/dist.zip /home/user/AstrBot/data/dist.zip
+RUN unzip -q /home/user/AstrBot/data/dist.zip -d /home/user/AstrBot/data && \
+    rm /home/user/AstrBot/data/dist.zip
 
 # 安装 Python 依赖（使用 venv 避免 PEP 668）
 RUN python3 -m venv "$VIRTUAL_ENV" && \
