@@ -8,7 +8,11 @@ export LANG
 
 # 读取与 backup_to_github.sh 相同的默认路径
 BACKUP_REPO_DIR=${BACKUP_REPO_DIR:-/home/user/.astrbot-backup}
-READINESS_FILE=${READINESS_FILE:-$BACKUP_REPO_DIR/.backup.ready}
+HIST_DIR=${HIST_DIR:-$BACKUP_REPO_DIR}
+READINESS_FILE=${READINESS_FILE:-}
+if [[ -z "${READINESS_FILE}" ]]; then
+  READINESS_FILE="$HIST_DIR/.backup.ready"
+fi
 BACKUP_WAIT_TIMEOUT=${BACKUP_WAIT_TIMEOUT:-0}  # 0 表示无限等待
 
 log() {
@@ -20,10 +24,13 @@ wait_for_ready() {
   local step=1
   log "等待备份初始化完成，检测就绪文件：$READINESS_FILE (超时: ${BACKUP_WAIT_TIMEOUT}s, 0=不超时)"
   while true; do
-    if [[ -f "$READINESS_FILE" ]]; then
-      log "检测到就绪文件，继续启动后续进程"
-      return 0
-    fi
+    # 支持多候选路径，兼容不同脚本默认
+    for candidate in "$READINESS_FILE" "$HIST_DIR/.backup.ready" "$BACKUP_REPO_DIR/.backup.ready" "/home/user/.astrbot-backup/.backup.ready"; do
+      if [[ -f "$candidate" ]]; then
+        log "检测到就绪文件：$candidate，继续启动后续进程"
+        return 0
+      fi
+    done
     if (( BACKUP_WAIT_TIMEOUT > 0 && waited >= BACKUP_WAIT_TIMEOUT )); then
       log "等待超时(${BACKUP_WAIT_TIMEOUT}s)，继续启动（不再阻塞）"
       return 0
@@ -34,4 +41,3 @@ wait_for_ready() {
 }
 
 wait_for_ready
-
