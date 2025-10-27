@@ -61,6 +61,22 @@ RUN python3 -m venv "$VIRTUAL_ENV" && \
     "$VIRTUAL_ENV/bin/pip" install --no-cache-dir socksio pilk && \
     chown -R 1000:1000 "$VIRTUAL_ENV"
 
+    # Python deps (use venv to avoid PEP 668)
+    RUN python3 -m venv "$VIRTUAL_ENV" && \
+    "$VIRTUAL_ENV/bin/pip" install --no-cache-dir --upgrade pip uv && \
+    uv pip install -r /home/user/AstrBot/requirements.txt --no-cache-dir && \
+    "$VIRTUAL_ENV/bin/pip" install --no-cache-dir socksio pilk \
+    "pymilvus>=2.5.4,<3.0.0" \
+    "pypinyin>=0.53.0,<1.0.0" \
+    "google-genai>=1.11.0,<2.0.0" \
+    "fastapi>=0.104.0,<1.0.0" \
+    "uvicorn>=0.24.0,<1.0.0" \
+    "jinja2>=3.1.0,<4.0.0" \
+    "openai>=1.0.0,<2.0.0" \
+    "httpx>=0.25.0,<1.0.0" && \
+    chown -R 1000:1000 "$VIRTUAL_ENV"
+
+
 # NapCat AppImage: extract and keep extracted tree
 ADD --chown=1000:1000 https://github.com/NapNeko/NapCatAppImageBuild/releases/download/v4.8.124/QQ-40990_NapCat-v4.8.124-amd64.AppImage /home/user/QQ.AppImage
 RUN chmod +x /home/user/QQ.AppImage && \
