@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev python3-venv \
     build-essential libffi-dev libssl-dev \
     ffmpeg \
-    supervisor nginx-full libnginx-mod-http-lua \
+    supervisor nginx-full libnginx-mod-http-ndk libnginx-mod-http-lua \
     xvfb libfuse2t64 \
     libglib2.0-0 libnspr4 libnss3 libatk1.0-0 libatspi2.0-0 \
     libgtk-3-0 libgdk-pixbuf-2.0-0 libpango-1.0-0 libcairo2 \
