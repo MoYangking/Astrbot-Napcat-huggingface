@@ -28,8 +28,8 @@ RUN apt-get update && apt-get install -y curl gnupg && \
     apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
-# 为无 root 用户准备（HF Spaces 默认 uid=1000）
-RUN useradd -m -u 1000 -s /bin/bash user
+# 为无 root 运行准备：创建工作目录并赋予 UID 1000（无需创建用户名，避免 UID 冲突）
+RUN mkdir -p /home/user && chown -R 1000:1000 /home/user
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH
 WORKDIR /home/user
@@ -39,7 +39,7 @@ RUN mkdir -p /tmp/.X11-unix && chmod 1777 /tmp/.X11-unix
 
 # 克隆 AstrBot 源码
 RUN git clone https://github.com/AstrBotDevs/AstrBot.git /home/user/AstrBot && \
-    chown -R user:user /home/user/AstrBot
+    chown -R 1000:1000 /home/user/AstrBot
 
 # 安装 Python 依赖（参考 AstrBot docker 文件使用 uv）
 RUN python3 -m pip install --no-cache-dir --upgrade pip uv && \
@@ -47,18 +47,18 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip uv && \
     uv pip install socksio uv pilk --no-cache-dir --system
 
 # 下载并解压 NapCat AppImage（构建期解压避免运行期 FUSE 需求）
-ADD --chown=user:user https://github.com/NapNeko/NapCatAppImageBuild/releases/download/v4.8.124/QQ-40990_NapCat-v4.8.124-amd64.AppImage /home/user/QQ.AppImage
+ADD --chown=1000:1000 https://github.com/NapNeko/NapCatAppImageBuild/releases/download/v4.8.124/QQ-40990_NapCat-v4.8.124-amd64.AppImage /home/user/QQ.AppImage
 RUN chmod +x /home/user/QQ.AppImage && \
     /home/user/QQ.AppImage --appimage-extract && \
     mv squashfs-root /home/user/napcat && \
     rm /home/user/QQ.AppImage && \
-    chown -R user:user /home/user/napcat
+    chown -R 1000:1000 /home/user/napcat
 
 # Supervisor 配置与日志目录
-RUN mkdir -p /home/user/logs && chown -R user:user /home/user/logs
-COPY --chown=user:user supervisor/supervisord.conf /home/user/supervisord.conf
+RUN mkdir -p /home/user/logs && chown -R 1000:1000 /home/user/logs
+COPY --chown=1000:1000 supervisor/supervisord.conf /home/user/supervisord.conf
 RUN mkdir -p /home/user/nginx
-COPY --chown=user:user nginx/nginx.conf /home/user/nginx/nginx.conf
+COPY --chown=1000:1000 nginx/nginx.conf /home/user/nginx/nginx.conf
 
 # 环境变量与端口
 ENV DISPLAY=:1 \
@@ -67,6 +67,6 @@ ENV DISPLAY=:1 \
 
 EXPOSE 7860
 
-# 以无 root 账户运行所有进程（由 supervisord 管理）
-USER user
+# 以 UID 1000 运行所有进程（由 supervisord 管理）
+USER 1000
 CMD ["supervisord", "-c", "/home/user/supervisord.conf"]
