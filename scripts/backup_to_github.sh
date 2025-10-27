@@ -33,7 +33,7 @@ GITHUB_PAT=${GITHUB_PAT:-}
 GITHUB_REPO=${GITHUB_REPO:-}
 GIT_BRANCH=${GIT_BRANCH:-main}
 BACKUP_REPO_DIR=${BACKUP_REPO_DIR:-/home/user/.astrbot-backup}
-BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-180}
+BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-60}
 GIT_USER_NAME=${GIT_USER_NAME:-astrbot-backup}
 GIT_USER_EMAIL=${GIT_USER_EMAIL:-astrbot-backup@local}
 READINESS_FILE=${READINESS_FILE:-}
@@ -53,7 +53,7 @@ BACKUP_PATHS=(
   "home/user/config"
   "app/napcat/config"
   "home/user/nginx/admin_config.json"
-  "app/napcat/.config/QQ"
+  "app/.config/QQ/"
 )
 
 # ====== 工具函数 ======
