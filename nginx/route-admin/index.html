@@ -7,25 +7,20 @@
   <style>
     :root { --bg:#0b1020; --card:#121933; --fg:#e7ecff; --muted:#a7b0d6; --accent:#6aa3ff; --ok:#2ecc71; --err:#ff4757; }
     html,body { margin:0; padding:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, PingFang SC, Noto Sans SC, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--fg); }
-    .container { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+    .container { max-width: 980px; margin: 24px auto; padding: 0 16px; }
     .card { background: var(--card); border-radius: 12px; padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,.25); margin-bottom: 16px; }
     h1 { font-size: 20px; margin: 0 0 12px; }
     h2 { font-size: 16px; margin: 16px 0 8px; color: var(--muted); }
     .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-    input[type=text] { flex: 1 1 240px; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a3359; background: #0e1430; color: var(--fg); outline: none; }
-    input[type=text]:focus { border-color: var(--accent); }
+    input[type=text], input[type=password] { flex: 1 1 240px; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a3359; background: #0e1430; color: var(--fg); outline: none; }
+    input[type=text]:focus, input[type=password]:focus { border-color: var(--accent); }
     button { padding: 10px 14px; border: none; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
     button.secondary { background: #33406e; }
     button.danger { background: var(--err); }
     .muted { color: var(--muted); font-size: 12px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-    th, td { text-align: left; border-bottom: 1px solid #2a3359; padding: 10px 8px; }
     .status { margin-left: 8px; font-size: 12px; }
     .status.ok { color: var(--ok); }
     .status.err { color: var(--err); }
-    .pill { font-size: 12px; background: #0e1430; border: 1px solid #2a3359; padding: 2px 6px; border-radius: 999px; }
-    .footer { margin-top: 8px; color: var(--muted); font-size: 12px; }
-    a { color: #9ec1ff; text-decoration: none; }
     textarea { width: 100%; min-height: 260px; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a3359; background: #0e1430; color: var(--fg); outline: none; resize: vertical; }
   </style>
 </head>
@@ -34,11 +29,11 @@
     <div class="card">
       <h1>Nginx 动态路由管理</h1>
       <div class="row">
-        <input id="token" type="text" placeholder="管理令牌（X-Route-Token）" />
-        <button id="saveToken">保存令牌</button>
+        <input id="token" type="password" placeholder="管理员密码（默认：admin）" />
+        <button id="saveToken">保存密码</button>
         <span id="tokenStatus" class="status"></span>
       </div>
-      <div class="footer">说明：本界面通过调用 Nginx 的 <code>/admin/routes</code> 与 <code>/admin/routes.json</code> 接口管理路由规则。若服务端设置了环境变量 <code>ROUTE_ADMIN_TOKEN</code>，需在此处填写同样的令牌。</div>
+      <div class="footer">说明：本界面通过 <code>/admin/routes.json</code> 与 <code>/admin/password</code> 接口管理配置，所有请求均需携带管理员密码。</div>
     </div>
 
     <div class="card">
@@ -51,35 +46,14 @@
     </div>
 
     <div class="card">
-      <h2>基础规则（Referer 子串匹配，越长越优先）</h2>
-      <div class="row">
-        <input id="newPattern" type="text" placeholder="匹配子串（如：webui）" />
-        <input id="newBackend" type="text" placeholder="后端地址（如：http://127.0.0.1:6099）" />
-        <button id="addRule">添加/更新规则</button>
-        <span id="addStatus" class="status"></span>
-      </div>
-
-      <table>
-        <thead>
-          <tr>
-            <th>匹配子串</th>
-            <th>后端地址</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="rulesBody"></tbody>
-      </table>
-      <div class="footer">注意：该规则仅作用于 <span class="pill">/api/*</span> 路由，其它路径不受影响。</div>
-    </div>
-
-    <div class="card">
       <h2>高级规则（JSON 配置）</h2>
-      <div class="footer">支持按 Host、Path 前缀、Referer（子串/正则）、HTTP 方法、Header 条件等进行匹配，并通过优先级控制先后次序。配置即时生效，无需重启。</div>
+      <div class="muted">支持按 Host、Path 前缀、Referer（子串/正则）、HTTP 方法、Header 条件进行匹配，并通过优先级控制先后顺序。保存后即时生效。</div>
       <div class="row" style="margin: 8px 0; gap: 8px;">
         <button id="loadJson" class="secondary">加载 JSON</button>
         <button id="toggleMode" class="secondary">切换到可视化编辑</button>
         <span id="jsonStatus" class="status"></span>
       </div>
+
       <div id="jsonEditorBox">
         <div class="row" style="margin: 8px 0; gap: 8px;">
           <button id="saveJson">保存 JSON</button>
@@ -90,20 +64,23 @@
   "rules": [
     {
       "id": "service-a",
+      "action": "proxy",
       "priority": 100,
       "backend": "http://127.0.0.1:7001",
       "match": {"host": "example.com", "path_prefix": "/api/a"}
     },
     {
       "id": "service-b",
+      "action": "redirect",
       "priority": 90,
-      "backend": "http://127.0.0.1:7002",
-      "match": {"referer_substr": "webui", "method": "POST"}
+      "match": {"path_prefix": "/legacy/"},
+      "redirect_to_prefix": "/new/"
     }
   ]
 }
 '></textarea>
       </div>
+
       <div id="visualEditorBox" style="display:none;">
         <div class="row" style="margin: 8px 0; gap: 8px;">
           <input id="veDefault" type="text" placeholder="默认后端（如：http://127.0.0.1:6185）" />
@@ -112,7 +89,17 @@
         </div>
         <div id="veRules"></div>
       </div>
-      <div class="footer">说明：POST 到 <code>/admin/routes.json</code>，字段包括 <code>default_backend</code> 与 <code>rules</code>（数组）。每条规则：<code>{ id?, action?, priority?, backend, match{ host?, path_equal?, path_prefix?, referer_substr?, referer_regex?, method?, headers?: [{ name, contains?, regex? }] }, redirect_to?, redirect_to_prefix?, set_headers? }</code>。</div>
+    </div>
+
+    <div class="card">
+      <h2>修改管理员密码</h2>
+      <div class="row" style="gap:8px;">
+        <input id="oldPass" type="password" placeholder="当前密码" />
+        <input id="newPass" type="password" placeholder="新密码" />
+        <input id="newPass2" type="password" placeholder="确认新密码" />
+        <button id="btnChgPwd">修改密码</button>
+        <span id="chgPwdStatus" class="status"></span>
+      </div>
     </div>
 
     <div class="muted">© 动态路由面板</div>
@@ -126,11 +113,6 @@
       defaultBackend: document.getElementById('defaultBackend'),
       setDefault: document.getElementById('setDefault'),
       defaultStatus: document.getElementById('defaultStatus'),
-      newPattern: document.getElementById('newPattern'),
-      newBackend: document.getElementById('newBackend'),
-      addRule: document.getElementById('addRule'),
-      addStatus: document.getElementById('addStatus'),
-      rulesBody: document.getElementById('rulesBody'),
       rulesJson: document.getElementById('rulesJson'),
       loadJson: document.getElementById('loadJson'),
       saveJson: document.getElementById('saveJson'),
@@ -142,20 +124,25 @@
       veRules: document.getElementById('veRules'),
       veAddRule: document.getElementById('veAddRule'),
       veSave: document.getElementById('veSave'),
+      oldPass: document.getElementById('oldPass'),
+      newPass: document.getElementById('newPass'),
+      newPass2: document.getElementById('newPass2'),
+      btnChgPwd: document.getElementById('btnChgPwd'),
+      chgPwdStatus: document.getElementById('chgPwdStatus'),
     };
 
     function getToken() {
-      return localStorage.getItem('routeAdminToken') || '';
+      return localStorage.getItem('routeAdminPassword') || '';
     }
 
     function setToken(t) {
-      if (t) localStorage.setItem('routeAdminToken', t); else localStorage.removeItem('routeAdminToken');
+      if (t) localStorage.setItem('routeAdminPassword', t); else localStorage.removeItem('routeAdminPassword');
     }
 
     function headers() {
-      const h = { };
+      const h = {};
       const t = getToken();
-      if (t) h['X-Route-Token'] = t;
+      if (t) h['X-Admin-Password'] = t;
       return h;
     }
 
@@ -179,127 +166,12 @@
       return true;
     }
 
-    async function fetchRoutes() {
-      els.tokenStatus.textContent = '';
-      try {
-        const obj = await loadJsonData();
-        const def = obj.default_backend || '';
-        els.defaultBackend.value = def;
-        // 基础规则：从 JSON 规则中抽取仅含 referer_substr 的规则用于展示
-        const rules = [];
-        (obj.rules || []).forEach(r => {
-          if (r && r.action !== 'redirect' && r.match && r.match.referer_substr && !r.match.host && !r.match.path_prefix && !r.match.path_equal && !r.match.method && !r.match.headers) {
-            rules.push({ pattern: r.match.referer_substr, backend: r.backend || '' });
-          }
-        });
-        render(def, rules);
-      } catch (e) {
-        els.tokenStatus.textContent = '无法获取路由：' + e.message;
-        els.tokenStatus.className = 'status err';
-      }
-    }
-
-    function render(def, rules) {
-      els.defaultBackend.value = def || '';
-      els.defaultStatus.textContent = '';
-      els.addStatus.textContent = '';
-
-      els.rulesBody.innerHTML = '';
-      for (const r of rules) {
-        const tr = document.createElement('tr');
-        const td1 = document.createElement('td');
-        const td2 = document.createElement('td');
-        const td3 = document.createElement('td');
-        td1.textContent = r.pattern;
-        td2.textContent = r.backend;
-
-        const del = document.createElement('button');
-        del.textContent = '删除';
-        del.className = 'danger';
-        del.onclick = () => deleteRule(r.pattern);
-        td3.appendChild(del);
-
-        tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
-        els.rulesBody.appendChild(tr);
-      }
-    }
-
-    async function postForm(data) { /* 已弃用：保留占位，改走 JSON */ }
-
-    async function setDefault() {
-      els.defaultStatus.textContent = '';
-      try {
-        const url = els.defaultBackend.value.trim();
-        if (!url) throw new Error('默认后端不能为空');
-        const obj = await loadJsonData();
-        obj.default_backend = url;
-        await saveJsonData(obj);
-        els.defaultStatus.textContent = '已更新';
-        els.defaultStatus.className = 'status ok';
-        fetchRoutes();
-      } catch (e) {
-        els.defaultStatus.textContent = '失败：' + e.message;
-        els.defaultStatus.className = 'status err';
-      }
-    }
-
-    async function addRule() {
-      els.addStatus.textContent = '';
-      try {
-        const p = els.newPattern.value.trim();
-        const b = els.newBackend.value.trim();
-        if (!p || !b) throw new Error('请填写匹配子串和后端地址');
-        const obj = await loadJsonData();
-        obj.rules = Array.isArray(obj.rules) ? obj.rules : [];
-        // 查找是否存在同 referer_substr 的基础规则
-        let found = false;
-        obj.rules = obj.rules.map(r => {
-          if (r && r.match && r.match.referer_substr === p) {
-            found = true;
-            return Object.assign({}, r, { action: 'proxy', backend: b });
-          }
-          return r;
-        });
-        if (!found) {
-          obj.rules.push({ action: 'proxy', backend: b, priority: 0, match: { referer_substr: p } });
-        }
-        await saveJsonData(obj);
-        els.addStatus.textContent = '已保存';
-        els.addStatus.className = 'status ok';
-        els.newPattern.value = '';
-        els.newBackend.value = '';
-        fetchRoutes();
-      } catch (e) {
-        els.addStatus.textContent = '失败：' + e.message;
-        els.addStatus.className = 'status err';
-      }
-    }
-
-    async function deleteRule(pattern) {
-      try {
-        const obj = await loadJsonData();
-        obj.rules = (obj.rules || []).filter(r => !(r && r.match && r.match.referer_substr === pattern));
-        await saveJsonData(obj);
-        fetchRoutes();
-      } catch (e) {
-        alert('删除失败：' + e.message);
-      }
-    }
-
-    // JSON API
     async function fetchRoutesJson() {
       els.jsonStatus.textContent = '';
       try {
-        const res = await fetch('/admin/routes.json', { headers: headers() });
-        const txt = await res.text();
-        if (!res.ok) throw new Error(txt || ('HTTP ' + res.status));
-        // pretty print
-        try {
-          const obj = JSON.parse(txt);
-          els.rulesJson.value = JSON.stringify(obj, null, 2);
-        } catch (_) {
-          els.rulesJson.value = txt;
-        }
+        const obj = await loadJsonData();
+        try { els.rulesJson.value = JSON.stringify(obj, null, 2); }
+        catch (_) { els.rulesJson.value = ''; }
         els.jsonStatus.textContent = '已加载';
         els.jsonStatus.className = 'status ok';
       } catch (e) {
@@ -313,18 +185,39 @@
       try {
         let obj;
         try { obj = JSON.parse(els.rulesJson.value); } catch (e) { throw new Error('JSON 解析失败：' + e.message); }
-        const res = await fetch('/admin/routes.json', {
-          method: 'POST',
-          headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
-          body: JSON.stringify(obj),
-        });
-        const txt = await res.text();
-        if (!res.ok) throw new Error(txt || ('HTTP ' + res.status));
+        await saveJsonData(obj);
         els.jsonStatus.textContent = '已保存';
         els.jsonStatus.className = 'status ok';
       } catch (e) {
         els.jsonStatus.textContent = e.message;
         els.jsonStatus.className = 'status err';
+      }
+    }
+
+    async function fetchRoutes() {
+      els.tokenStatus.textContent = '';
+      try {
+        const obj = await loadJsonData();
+        els.defaultBackend.value = obj.default_backend || '';
+      } catch (e) {
+        els.tokenStatus.textContent = '无法获取路由：' + e.message;
+        els.tokenStatus.className = 'status err';
+      }
+    }
+
+    async function setDefault() {
+      els.defaultStatus.textContent = '';
+      try {
+        const url = els.defaultBackend.value.trim();
+        if (!url) throw new Error('默认后端不能为空');
+        const obj = await loadJsonData();
+        obj.default_backend = url;
+        await saveJsonData(obj);
+        els.defaultStatus.textContent = '已更新';
+        els.defaultStatus.className = 'status ok';
+      } catch (e) {
+        els.defaultStatus.textContent = '失败：' + e.message;
+        els.defaultStatus.className = 'status err';
       }
     }
 
@@ -344,7 +237,7 @@
           </select>
           <input class="ve-id" type="text" placeholder="id（可选）" value="${r.id || ''}">
           <input class="ve-pri" type="text" placeholder="priority（数字，默认0）" value="${r.priority != null ? r.priority : ''}">
-          <input class="ve-backend" type="text" placeholder="backend（action=proxy 时必填）" value="${r.backend || ''}">
+          <input class="ve-backend" type="text" placeholder="backend（action=proxy 必填）" value="${r.backend || ''}">
           <input class="ve-redirect-to" type="text" placeholder="redirect_to（重定向目标）" value="${r.redirect_to || ''}">
           <input class="ve-redirect-prefix" type="text" placeholder="redirect_to_prefix（重定向前缀拼接）" value="${r.redirect_to_prefix || ''}">
           <button class="ve-del danger">删除规则</button>
@@ -357,7 +250,7 @@
           <input class="ve-ref-reg" type="text" placeholder="match.referer_regex" value="${match.referer_regex || ''}">
           <input class="ve-method" type="text" placeholder="match.method" value="${match.method || ''}">
         </div>
-        <div class="footer" style="margin-top:6px;">Headers 条件</div>
+        <div class="muted" style="margin-top:6px;">Headers 条件</div>
         <div class="ve-headers"></div>
         <div class="row" style="gap:8px; margin-top:6px;">
           <button class="ve-add-header secondary">添加 Header 条件</button>
@@ -458,7 +351,6 @@
     function switchMode() {
       const visual = els.visualEditorBox.style.display !== 'none';
       if (visual) {
-        // switch to code editor
         els.visualEditorBox.style.display = 'none';
         els.jsonEditorBox.style.display = '';
         els.toggleMode.textContent = '切换到可视化编辑';
@@ -473,18 +365,41 @@
     // 事件绑定
     els.saveToken.onclick = () => {
       setToken(els.token.value.trim());
-      els.tokenStatus.textContent = '令牌已保存到本地浏览器';
+      els.tokenStatus.textContent = '密码已保存到本地浏览器';
       els.tokenStatus.className = 'status ok';
       fetchRoutes();
       fetchRoutesJson();
     };
     els.setDefault.onclick = setDefault;
-    els.addRule.onclick = addRule;
     els.loadJson.onclick = fetchRoutesJson;
     els.saveJson.onclick = saveRoutesJson;
     els.veAddRule.onclick = () => els.veRules.appendChild(ruleBlockTemplate({ action: 'proxy', priority: 0 }));
     els.veSave.onclick = saveVisual;
     els.toggleMode.onclick = switchMode;
+    els.btnChgPwd.onclick = async () => {
+      els.chgPwdStatus.textContent = '';
+      try {
+        const cur = els.oldPass.value.trim();
+        const np = els.newPass.value.trim();
+        const np2 = els.newPass2.value.trim();
+        if (!cur || !np) throw new Error('请输入当前密码和新密码');
+        if (np !== np2) throw new Error('两次输入的新密码不一致');
+        const res = await fetch('/admin/password', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json', 'X-Admin-Password': cur }, headers()),
+          body: JSON.stringify({ new_password: np })
+        });
+        const txt = await res.text();
+        if (!res.ok) throw new Error(txt || ('HTTP ' + res.status));
+        setToken(np);
+        els.token.value = np;
+        els.chgPwdStatus.textContent = '已修改';
+        els.chgPwdStatus.className = 'status ok';
+      } catch (e) {
+        els.chgPwdStatus.textContent = e.message;
+        els.chgPwdStatus.className = 'status err';
+      }
+    };
 
     // 初始化
     (function init() {
@@ -496,3 +411,4 @@
   </script>
 </body>
 </html>
+
