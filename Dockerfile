@@ -86,7 +86,11 @@ RUN mkdir -p \
 RUN mkdir -p /app/.config/QQ /app/napcat/config && chown -R 1000:1000 /app
 RUN mkdir -p /home/user/scripts && chown -R 1000:1000 /home/user/scripts
 COPY --chown=1000:1000 scripts/run-napcat.sh /home/user/scripts/run-napcat.sh
-RUN chmod +x /home/user/scripts/run-napcat.sh
+COPY --chown=1000:1000 scripts/backup_to_github.sh /home/user/scripts/backup_to_github.sh
+COPY --chown=1000:1000 scripts/wait_for_backup.sh /home/user/scripts/wait_for_backup.sh
+RUN chmod +x /home/user/scripts/run-napcat.sh \
+    && chmod +x /home/user/scripts/backup_to_github.sh \
+    && chmod +x /home/user/scripts/wait_for_backup.sh
 
 # Env and ports
 ENV DISPLAY=:1 \
