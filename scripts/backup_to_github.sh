@@ -56,7 +56,7 @@ HYDRATE_TIMEOUT=${HYDRATE_TIMEOUT:-0}
 READINESS_FILE=${READINESS_FILE:-$HIST_DIR/.backup.ready}
 
 # 备份/管理的目标（相对 BASE）
-TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config home/user/nginx/admin_config.json app/napcat/.config/QQ"}
+TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config home/user/nginx/admin_config.json app/.config/QQ"}
 
 # ====== 日志与信号 ======
 LOG() { printf '[%s] [backup] %s\n' "$(date '+%F %T')" "$*"; }
