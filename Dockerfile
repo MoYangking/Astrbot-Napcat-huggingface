@@ -60,8 +60,15 @@ RUN chmod +x /home/user/QQ.AppImage && \
 # Supervisor 配置与日志目录
 RUN mkdir -p /home/user/logs && chown -R 1000:1000 /home/user/logs
 COPY --chown=1000:1000 supervisor/supervisord.conf /home/user/supervisord.conf
-RUN mkdir -p /home/user/nginx
+RUN mkdir -p /home/user/nginx && chown -R 1000:1000 /home/user/nginx
 COPY --chown=1000:1000 nginx/nginx.conf /home/user/nginx/nginx.conf
+RUN mkdir -p \
+      /home/user/nginx/tmp/body \
+      /home/user/nginx/tmp/proxy \
+      /home/user/nginx/tmp/fastcgi \
+      /home/user/nginx/tmp/uwsgi \
+      /home/user/nginx/tmp/scgi \
+    && chown -R 1000:1000 /home/user/nginx
 
 # 环境变量与端口
 ENV DISPLAY=:1 \
