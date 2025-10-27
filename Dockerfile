@@ -11,14 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libffi-dev libssl-dev \
     ffmpeg \
     supervisor nginx \
-    xvfb libfuse2 \
+    xvfb libfuse2t64 \
     libglib2.0-0 libnspr4 libnss3 libatk1.0-0 libatspi2.0-0 \
-    libgtk-3-0 libgdk-pixbuf2.0-0 libpango-1.0-0 libcairo2 \
+    libgtk-3-0 libgdk-pixbuf-2.0-0 libpango-1.0-0 libcairo2 \
     libx11-6 libx11-xcb1 libxext6 libxrender1 libxi6 libxrandr2 \
     libxcomposite1 libxdamage1 libxkbcommon0 libxfixes3 \
     libxcb1 libxcb-render0 libxcb-shm0 \
     libdrm2 libgbm1 \
-    libxss1 libxtst6 libasound2 \
+    libxss1 libxtst6 libasound2t64 \
     libsecret-1-0 libnotify4 libdbus-1-3 libgl1 \
  && rm -rf /var/lib/apt/lists/*
 
