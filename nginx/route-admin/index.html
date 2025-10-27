@@ -77,10 +77,14 @@
       <div class="footer">支持按 Host、Path 前缀、Referer（子串/正则）、HTTP 方法、Header 条件等进行匹配，并通过优先级控制先后次序。配置即时生效，无需重启。</div>
       <div class="row" style="margin: 8px 0; gap: 8px;">
         <button id="loadJson" class="secondary">加载 JSON</button>
-        <button id="saveJson">保存 JSON</button>
+        <button id="toggleMode" class="secondary">切换到可视化编辑</button>
         <span id="jsonStatus" class="status"></span>
       </div>
-      <textarea id="rulesJson" placeholder='示例：
+      <div id="jsonEditorBox">
+        <div class="row" style="margin: 8px 0; gap: 8px;">
+          <button id="saveJson">保存 JSON</button>
+        </div>
+        <textarea id="rulesJson" placeholder='示例：
 {
   "default_backend": "http://127.0.0.1:6185",
   "rules": [
@@ -99,7 +103,16 @@
   ]
 }
 '></textarea>
-      <div class="footer">说明：POST 到 <code>/admin/routes.json</code>，字段包括 <code>default_backend</code> 与 <code>rules</code>（数组）。每条规则：<code>{ id?, priority?, backend, match{ host?, path_prefix?, referer_substr?, referer_regex?, method?, headers?: [{ name, contains?, regex? }] } }</code>。</div>
+      </div>
+      <div id="visualEditorBox" style="display:none;">
+        <div class="row" style="margin: 8px 0; gap: 8px;">
+          <input id="veDefault" type="text" placeholder="默认后端（如：http://127.0.0.1:6185）" />
+          <button id="veAddRule">添加规则</button>
+          <button id="veSave">保存（可视化）</button>
+        </div>
+        <div id="veRules"></div>
+      </div>
+      <div class="footer">说明：POST 到 <code>/admin/routes.json</code>，字段包括 <code>default_backend</code> 与 <code>rules</code>（数组）。每条规则：<code>{ id?, action?, priority?, backend, match{ host?, path_equal?, path_prefix?, referer_substr?, referer_regex?, method?, headers?: [{ name, contains?, regex? }] }, redirect_to?, redirect_to_prefix?, set_headers? }</code>。</div>
     </div>
 
     <div class="muted">© 动态路由面板</div>
@@ -122,6 +135,13 @@
       loadJson: document.getElementById('loadJson'),
       saveJson: document.getElementById('saveJson'),
       jsonStatus: document.getElementById('jsonStatus'),
+      toggleMode: document.getElementById('toggleMode'),
+      jsonEditorBox: document.getElementById('jsonEditorBox'),
+      visualEditorBox: document.getElementById('visualEditorBox'),
+      veDefault: document.getElementById('veDefault'),
+      veRules: document.getElementById('veRules'),
+      veAddRule: document.getElementById('veAddRule'),
+      veSave: document.getElementById('veSave'),
     };
 
     function getToken() {
@@ -308,6 +328,148 @@
       }
     }
 
+    // 可视化编辑：构建/渲染/收集
+    function ruleBlockTemplate(r) {
+      r = r || {};
+      const match = r.match || {};
+      const headers = Array.isArray(match.headers) ? match.headers : [];
+      const div = document.createElement('div');
+      div.className = 'card';
+      div.style.margin = '8px 0';
+      div.innerHTML = `
+        <div class="row" style="gap:8px;">
+          <select class="ve-action">
+            <option value="proxy" ${r.action === 'redirect' ? '' : 'selected'}>proxy</option>
+            <option value="redirect" ${r.action === 'redirect' ? 'selected' : ''}>redirect</option>
+          </select>
+          <input class="ve-id" type="text" placeholder="id（可选）" value="${r.id || ''}">
+          <input class="ve-pri" type="text" placeholder="priority（数字，默认0）" value="${r.priority != null ? r.priority : ''}">
+          <input class="ve-backend" type="text" placeholder="backend（action=proxy 时必填）" value="${r.backend || ''}">
+          <input class="ve-redirect-to" type="text" placeholder="redirect_to（重定向目标）" value="${r.redirect_to || ''}">
+          <input class="ve-redirect-prefix" type="text" placeholder="redirect_to_prefix（重定向前缀拼接）" value="${r.redirect_to_prefix || ''}">
+          <button class="ve-del danger">删除规则</button>
+        </div>
+        <div class="row" style="gap:8px; margin-top:6px;">
+          <input class="ve-host" type="text" placeholder="match.host" value="${match.host || ''}">
+          <input class="ve-path-eq" type="text" placeholder="match.path_equal" value="${match.path_equal || ''}">
+          <input class="ve-path-pfx" type="text" placeholder="match.path_prefix" value="${match.path_prefix || ''}">
+          <input class="ve-ref-sub" type="text" placeholder="match.referer_substr" value="${match.referer_substr || ''}">
+          <input class="ve-ref-reg" type="text" placeholder="match.referer_regex" value="${match.referer_regex || ''}">
+          <input class="ve-method" type="text" placeholder="match.method" value="${match.method || ''}">
+        </div>
+        <div class="footer" style="margin-top:6px;">Headers 条件</div>
+        <div class="ve-headers"></div>
+        <div class="row" style="gap:8px; margin-top:6px;">
+          <button class="ve-add-header secondary">添加 Header 条件</button>
+        </div>
+      `;
+      const headersBox = div.querySelector('.ve-headers');
+      function addHeaderRow(h) {
+        h = h || {}; const row = document.createElement('div');
+        row.className = 'row'; row.style.gap = '8px'; row.style.marginTop = '6px';
+        row.innerHTML = `
+          <input class="ve-h-name" type="text" placeholder="name" value="${h.name || ''}">
+          <input class="ve-h-contains" type="text" placeholder="contains" value="${h.contains || ''}">
+          <input class="ve-h-regex" type="text" placeholder="regex" value="${h.regex || ''}">
+          <button class="ve-h-del danger">删除</button>
+        `;
+        row.querySelector('.ve-h-del').onclick = () => row.remove();
+        headersBox.appendChild(row);
+      }
+      headers.forEach(addHeaderRow);
+      div.querySelector('.ve-add-header').onclick = () => addHeaderRow({});
+      div.querySelector('.ve-del').onclick = () => div.remove();
+      return div;
+    }
+
+    function renderVisualEditor(obj) {
+      els.veDefault.value = obj.default_backend || '';
+      els.veRules.innerHTML = '';
+      (obj.rules || []).forEach(r => {
+        els.veRules.appendChild(ruleBlockTemplate(r));
+      });
+    }
+
+    function collectVisualJson() {
+      const rules = [];
+      const blocks = els.veRules.children;
+      for (let i=0;i<blocks.length;i++) {
+        const b = blocks[i];
+        const action = b.querySelector('.ve-action').value || 'proxy';
+        const id = b.querySelector('.ve-id').value.trim();
+        const pri = parseInt(b.querySelector('.ve-pri').value, 10);
+        const backend = b.querySelector('.ve-backend').value.trim();
+        const redirect_to = b.querySelector('.ve-redirect-to').value.trim();
+        const redirect_to_prefix = b.querySelector('.ve-redirect-prefix').value.trim();
+        const match = {
+          host: b.querySelector('.ve-host').value.trim() || undefined,
+          path_equal: b.querySelector('.ve-path-eq').value.trim() || undefined,
+          path_prefix: b.querySelector('.ve-path-pfx').value.trim() || undefined,
+          referer_substr: b.querySelector('.ve-ref-sub').value.trim() || undefined,
+          referer_regex: b.querySelector('.ve-ref-reg').value.trim() || undefined,
+          method: b.querySelector('.ve-method').value.trim() || undefined,
+        };
+        // headers collect
+        const hs = [];
+        const headerRows = b.querySelectorAll('.ve-headers .row');
+        headerRows.forEach(r => {
+          const name = r.querySelector('.ve-h-name').value.trim();
+          const contains = r.querySelector('.ve-h-contains').value.trim();
+          const regex = r.querySelector('.ve-h-regex').value.trim();
+          if (name) hs.push({ name, contains: contains || undefined, regex: regex || undefined });
+        });
+        if (hs.length) match.headers = hs;
+
+        const rule = { action, id: id || undefined, priority: isNaN(pri)? 0 : pri, match };
+        if (action === 'proxy') rule.backend = backend;
+        if (action === 'redirect') {
+          if (redirect_to) rule.redirect_to = redirect_to;
+          if (redirect_to_prefix) rule.redirect_to_prefix = redirect_to_prefix;
+        }
+        rules.push(rule);
+      }
+      return { default_backend: els.veDefault.value.trim(), rules };
+    }
+
+    async function loadVisual() {
+      try {
+        const obj = await loadJsonData();
+        renderVisualEditor(obj);
+        els.jsonStatus.textContent = '可视化已加载';
+        els.jsonStatus.className = 'status ok';
+      } catch (e) {
+        els.jsonStatus.textContent = '加载失败：' + e.message;
+        els.jsonStatus.className = 'status err';
+      }
+    }
+
+    async function saveVisual() {
+      try {
+        const obj = collectVisualJson();
+        await saveJsonData(obj);
+        els.jsonStatus.textContent = '已保存';
+        els.jsonStatus.className = 'status ok';
+      } catch (e) {
+        els.jsonStatus.textContent = '保存失败：' + e.message;
+        els.jsonStatus.className = 'status err';
+      }
+    }
+
+    function switchMode() {
+      const visual = els.visualEditorBox.style.display !== 'none';
+      if (visual) {
+        // switch to code editor
+        els.visualEditorBox.style.display = 'none';
+        els.jsonEditorBox.style.display = '';
+        els.toggleMode.textContent = '切换到可视化编辑';
+      } else {
+        els.visualEditorBox.style.display = '';
+        els.jsonEditorBox.style.display = 'none';
+        els.toggleMode.textContent = '切换到代码编辑';
+        loadVisual();
+      }
+    }
+
     // 事件绑定
     els.saveToken.onclick = () => {
       setToken(els.token.value.trim());
@@ -320,6 +482,9 @@
     els.addRule.onclick = addRule;
     els.loadJson.onclick = fetchRoutesJson;
     els.saveJson.onclick = saveRoutesJson;
+    els.veAddRule.onclick = () => els.veRules.appendChild(ruleBlockTemplate({ action: 'proxy', priority: 0 }));
+    els.veSave.onclick = saveVisual;
+    els.toggleMode.onclick = switchMode;
 
     // 初始化
     (function init() {
