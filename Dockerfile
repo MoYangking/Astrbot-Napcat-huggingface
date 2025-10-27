@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev python3-venv \
     build-essential libffi-dev libssl-dev \
     ffmpeg \
-    supervisor nginx-full libnginx-mod-http-ndk libnginx-mod-http-lua \
+    supervisor nginx-full \
     xvfb libfuse2t64 \
     libglib2.0-0 libnspr4 libnss3 libatk1.0-0 libatspi2.0-0 \
     libgtk-3-0 libgdk-pixbuf-2.0-0 libpango-1.0-0 libcairo2 \
@@ -26,6 +26,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update && apt-get install -y curl gnupg && \
     curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
     apt-get install -y nodejs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install OpenResty (nginx with built-in LuaJIT & ngx_lua)
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release && \
+    curl -fsSL https://openresty.org/package/pubkey.gpg | gpg --dearmor -o /usr/share/keyrings/openresty.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/openresty.gpg] http://openresty.org/package/ubuntu $(lsb_release -sc) main" \
+      | tee /etc/apt/sources.list.d/openresty.list > /dev/null && \
+    apt-get update && apt-get install -y --no-install-recommends openresty && \
     rm -rf /var/lib/apt/lists/*
 
 # Non-root user paths (UID 1000)
@@ -86,6 +95,9 @@ ENV DISPLAY=:1 \
 
 # Optional: admin token for updating routes at runtime (used by Lua)
 ENV ROUTE_ADMIN_TOKEN=""
+
+# Ensure OpenResty binaries present in PATH
+ENV PATH=/usr/local/openresty/bin:$PATH
 
 EXPOSE 7860
 
