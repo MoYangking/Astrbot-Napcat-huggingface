@@ -54,6 +54,8 @@ HYDRATE_TIMEOUT=${HYDRATE_TIMEOUT:-0}
 
 # 就绪与健康
 READINESS_FILE=${READINESS_FILE:-$HIST_DIR/.backup.ready}
+# 日志目录（按需写入文件，并同时保留到标准输出）
+SYNC_LOG_DIR=${SYNC_LOG_DIR:-/home/user/synclogs}
 
 # 备份/管理的目标（相对 BASE）
 TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config home/user/nginx/admin_config.json app/.config/QQ"}
@@ -62,11 +64,24 @@ TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config ho
 LOG() { printf '[%s] [backup] %s\n' "$(date '+%F %T')" "$*"; }
 ERR() { printf '[%s] [backup] ERROR: %s\n' "$(date '+%F %T')" "$*" >&2; }
 
+init_logging() {
+  mkdir -p "$SYNC_LOG_DIR" >/dev/null 2>&1 || true
+  local out="$SYNC_LOG_DIR/backup.log" err="$SYNC_LOG_DIR/backup.err"
+  if command -v stdbuf >/dev/null 2>&1; then
+    exec > >(stdbuf -oL tee -a "$out") 2> >(stdbuf -oL tee -a "$err" >&2)
+  else
+    exec > >(tee -a "$out") 2> >(tee -a "$err" >&2)
+  fi
+}
+
 STOP_REQUESTED=0
 on_term() { STOP_REQUESTED=1; LOG "收到停止信号，准备优雅退出"; }
 trap on_term INT TERM
 
 trap 'code=$?; if { [ "$MODE" = "init" ] || [ "$MODE" = "daemon" ] || [ "$MODE" = "monitor" ]; } && [ $code -ne 0 ]; then ERR "backup_to_github.sh 异常退出（$code）"; fi' EXIT
+
+# 初始化日志重定向（必须尽早）
+init_logging
 
 # ====== 工具 ======
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
@@ -105,6 +120,7 @@ ensure_repo() {
 
   local url; url="$(remote_url || true)" || true
   if [ -n "$url" ]; then
+    LOG "设置远端：repo=${github_project:-$GITHUB_REPO} branch=$GIT_BRANCH"
     if git -C "$HIST_DIR" remote | grep -q '^origin$'; then
       git -C "$HIST_DIR" remote set-url origin "$url"
     else
@@ -140,7 +156,7 @@ link_targets() {
       LOG "初始化目标：$target"
       if [ -d "$src" ]; then
         if need_cmd rsync; then rsync -av --ignore-existing "$src/" "$dst/" || cp -anr "$src/." "$dst/";
-        else cp -anr "$src/." "$dst"/; fi
+        else cp -anr "$src/." "$dst/"; fi
         rm -rf "$src"
       else
         if [ ! -e "$dst" ]; then mv -f "$src" "$dst"; else rm -f "$src"; fi
@@ -385,9 +401,12 @@ wait_until_hydrated() {
 # ====== 提交与推送 ======
 commit_and_push() {
   git_sanitize_repo
-  if git -C "$HIST_DIR" status --porcelain | grep -q .; then
-    git -C "$HIST_DIR" add -A
-    git -C "$HIST_DIR" commit -m "auto: $(date '+%Y-%m-%d %H:%M:%S')" || true
+  git -C "$HIST_DIR" add -A
+  if git -C "$HIST_DIR" diff --cached --quiet; then
+    LOG "工作区无变更，跳过提交"
+  else
+    git -C "$HIST_DIR" commit -m "auto: $(date '+%Y-%m-%d %H:%M:%S')"
+    LOG "已提交变更"
   fi
   if git -C "$HIST_DIR" remote | grep -q '^origin$'; then
     local pushed=0; for attempt in 1 2 3; do
@@ -396,7 +415,7 @@ commit_and_push() {
         git -C "$HIST_DIR" rebase --abort >/dev/null 2>&1 || true
         LOG "pull --rebase 失败（第${attempt}次），重试"
       fi
-      if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" push -u origin "$GIT_BRANCH"; then pushed=1; break; else LOG "push 被拒绝，重试(${attempt})"; sleep 1; fi
+      if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" push -u origin "$GIT_BRANCH"; then LOG "推送成功（第${attempt}次）"; pushed=1; break; else LOG "push 失败/被拒绝，重试(${attempt})"; sleep 1; fi
     done
     [ "$pushed" = 1 ] || ERR "多次重试仍无法推送，已保留本地提交"
   fi
@@ -444,4 +463,3 @@ case "$MODE" in
   *)
     ERR "未知模式：$MODE（应为 init|daemon|monitor|restore）"; exit 2 ;;
 esac
-

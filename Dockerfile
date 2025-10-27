@@ -108,6 +108,9 @@ RUN chmod +x /home/user/scripts/run-napcat.sh \
     && chmod +x /home/user/scripts/backup_to_github.sh \
     && chmod +x /home/user/scripts/wait_for_backup.sh
 
+# Log directory for sync script
+RUN mkdir -p /home/user/synclogs && chown -R 1000:1000 /home/user/synclogs
+
 # Env and ports
 ENV DISPLAY=:1 \
     LIBGL_ALWAYS_SOFTWARE=1 \
