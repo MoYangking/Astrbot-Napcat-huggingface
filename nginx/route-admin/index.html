@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nginx 动态路由管理</title>
+  <style>
+    :root { --bg:#0b1020; --card:#121933; --fg:#e7ecff; --muted:#a7b0d6; --accent:#6aa3ff; --ok:#2ecc71; --err:#ff4757; }
+    html,body { margin:0; padding:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, PingFang SC, Noto Sans SC, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--fg); }
+    .container { max-width: 960px; margin: 24px auto; padding: 0 16px; }
+    .card { background: var(--card); border-radius: 12px; padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,.25); margin-bottom: 16px; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    h2 { font-size: 16px; margin: 16px 0 8px; color: var(--muted); }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    input[type=text] { flex: 1 1 240px; padding: 10px 12px; border-radius: 8px; border: 1px solid #2a3359; background: #0e1430; color: var(--fg); outline: none; }
+    input[type=text]:focus { border-color: var(--accent); }
+    button { padding: 10px 14px; border: none; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+    button.secondary { background: #33406e; }
+    button.danger { background: var(--err); }
+    .muted { color: var(--muted); font-size: 12px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { text-align: left; border-bottom: 1px solid #2a3359; padding: 10px 8px; }
+    .status { margin-left: 8px; font-size: 12px; }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--err); }
+    .pill { font-size: 12px; background: #0e1430; border: 1px solid #2a3359; padding: 2px 6px; border-radius: 999px; }
+    .footer { margin-top: 8px; color: var(--muted); font-size: 12px; }
+    a { color: #9ec1ff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h1>Nginx 动态路由管理</h1>
+      <div class="row">
+        <input id="token" type="text" placeholder="管理令牌（X-Route-Token）" />
+        <button id="saveToken">保存令牌</button>
+        <span id="tokenStatus" class="status"></span>
+      </div>
+      <div class="footer">说明：本界面通过调用 Nginx 的 <code>/admin/routes</code> 接口管理路由规则。若服务端设置了环境变量 <code>ROUTE_ADMIN_TOKEN</code>，需在此处填写同样的令牌。</div>
+    </div>
+
+    <div class="card">
+      <h2>默认后端</h2>
+      <div class="row">
+        <input id="defaultBackend" type="text" placeholder="例如：http://127.0.0.1:6185" />
+        <button id="setDefault">更新默认后端</button>
+        <span id="defaultStatus" class="status"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>匹配规则（按 Referer 子串匹配，越长越优先）</h2>
+      <div class="row">
+        <input id="newPattern" type="text" placeholder="匹配子串（如：webui）" />
+        <input id="newBackend" type="text" placeholder="后端地址（如：http://127.0.0.1:6099）" />
+        <button id="addRule">添加/更新规则</button>
+        <span id="addStatus" class="status"></span>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>匹配子串</th>
+            <th>后端地址</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="rulesBody"></tbody>
+      </table>
+      <div class="footer">注意：该规则仅作用于 <span class="pill">/api/*</span> 路由，其它路径不受影响。</div>
+    </div>
+
+    <div class="muted">© 动态路由面板</div>
+  </div>
+
+  <script>
+    const els = {
+      token: document.getElementById('token'),
+      saveToken: document.getElementById('saveToken'),
+      tokenStatus: document.getElementById('tokenStatus'),
+      defaultBackend: document.getElementById('defaultBackend'),
+      setDefault: document.getElementById('setDefault'),
+      defaultStatus: document.getElementById('defaultStatus'),
+      newPattern: document.getElementById('newPattern'),
+      newBackend: document.getElementById('newBackend'),
+      addRule: document.getElementById('addRule'),
+      addStatus: document.getElementById('addStatus'),
+      rulesBody: document.getElementById('rulesBody'),
+    };
+
+    function getToken() {
+      return localStorage.getItem('routeAdminToken') || '';
+    }
+
+    function setToken(t) {
+      if (t) localStorage.setItem('routeAdminToken', t); else localStorage.removeItem('routeAdminToken');
+    }
+
+    function headers() {
+      const h = { };
+      const t = getToken();
+      if (t) h['X-Route-Token'] = t;
+      return h;
+    }
+
+    async function fetchRoutes() {
+      els.tokenStatus.textContent = '';
+      try {
+        const res = await fetch('/admin/routes', { headers: headers() });
+        const text = await res.text();
+        if (!res.ok) {
+          throw new Error(text || ('HTTP ' + res.status));
+        }
+        // 解析服务端文本
+        // default_backend=http://...
+        // rule: pattern=PAT, backend=URL
+        const lines = text.split(/\n+/).map(s => s.trim()).filter(Boolean);
+        let def = '';
+        const rules = [];
+        for (const line of lines) {
+          if (line.startsWith('default_backend=')) {
+            def = line.slice('default_backend='.length);
+          } else if (line.startsWith('rule:')) {
+            // 允许逗号后有空格
+            const m1 = line.match(/pattern=(.*?),\s*backend=(.+)$/);
+            if (m1) rules.push({ pattern: m1[1], backend: m1[2] });
+          }
+        }
+        render(def, rules);
+      } catch (e) {
+        els.tokenStatus.textContent = '无法获取路由：' + e.message;
+        els.tokenStatus.className = 'status err';
+      }
+    }
+
+    function render(def, rules) {
+      els.defaultBackend.value = def || '';
+      els.defaultStatus.textContent = '';
+      els.addStatus.textContent = '';
+
+      els.rulesBody.innerHTML = '';
+      for (const r of rules) {
+        const tr = document.createElement('tr');
+        const td1 = document.createElement('td');
+        const td2 = document.createElement('td');
+        const td3 = document.createElement('td');
+        td1.textContent = r.pattern;
+        td2.textContent = r.backend;
+
+        const del = document.createElement('button');
+        del.textContent = '删除';
+        del.className = 'danger';
+        del.onclick = () => deleteRule(r.pattern);
+        td3.appendChild(del);
+
+        tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+        els.rulesBody.appendChild(tr);
+      }
+    }
+
+    async function postForm(data) {
+      const body = new URLSearchParams();
+      Object.entries(data).forEach(([k, v]) => body.append(k, v));
+      const res = await fetch('/admin/routes', {
+        method: 'POST',
+        headers: Object.assign({ 'Content-Type': 'application/x-www-form-urlencoded' }, headers()),
+        body: body.toString(),
+      });
+      const text = await res.text();
+      if (!res.ok) throw new Error(text || ('HTTP ' + res.status));
+      return text;
+    }
+
+    async function setDefault() {
+      els.defaultStatus.textContent = '';
+      try {
+        const url = els.defaultBackend.value.trim();
+        if (!url) throw new Error('默认后端不能为空');
+        await postForm({ 'default': url });
+        els.defaultStatus.textContent = '已更新';
+        els.defaultStatus.className = 'status ok';
+        fetchRoutes();
+      } catch (e) {
+        els.defaultStatus.textContent = '失败：' + e.message;
+        els.defaultStatus.className = 'status err';
+      }
+    }
+
+    async function addRule() {
+      els.addStatus.textContent = '';
+      try {
+        const p = els.newPattern.value.trim();
+        const b = els.newBackend.value.trim();
+        if (!p || !b) throw new Error('请填写匹配子串和后端地址');
+        await postForm({ pattern: p, backend: b });
+        els.addStatus.textContent = '已保存';
+        els.addStatus.className = 'status ok';
+        els.newPattern.value = '';
+        els.newBackend.value = '';
+        fetchRoutes();
+      } catch (e) {
+        els.addStatus.textContent = '失败：' + e.message;
+        els.addStatus.className = 'status err';
+      }
+    }
+
+    async function deleteRule(pattern) {
+      try {
+        await postForm({ op: 'delete', pattern });
+        fetchRoutes();
+      } catch (e) {
+        alert('删除失败：' + e.message);
+      }
+    }
+
+    // 事件绑定
+    els.saveToken.onclick = () => {
+      setToken(els.token.value.trim());
+      els.tokenStatus.textContent = '令牌已保存到本地浏览器';
+      els.tokenStatus.className = 'status ok';
+      fetchRoutes();
+    };
+    els.setDefault.onclick = setDefault;
+    els.addRule.onclick = addRule;
+
+    // 初始化
+    (function init() {
+      const t = getToken();
+      if (t) els.token.value = t;
+      fetchRoutes();
+    })();
+  </script>
+</body>
+</html>
+
