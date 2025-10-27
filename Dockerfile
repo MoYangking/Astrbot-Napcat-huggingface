@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev \
     build-essential libffi-dev libssl-dev \
     ffmpeg \
-    supervisor \
+    supervisor nginx \
     xvfb libfuse2 \
     libglib2.0-0 libnspr4 libnss3 libatk1.0-0 libatspi2.0-0 \
     libgtk-3-0 libgdk-pixbuf2.0-0 libpango-1.0-0 libcairo2 \
@@ -57,13 +57,15 @@ RUN chmod +x /home/user/QQ.AppImage && \
 # Supervisor 配置与日志目录
 RUN mkdir -p /home/user/logs && chown -R user:user /home/user/logs
 COPY --chown=user:user supervisor/supervisord.conf /home/user/supervisord.conf
+RUN mkdir -p /home/user/nginx
+COPY --chown=user:user nginx/nginx.conf /home/user/nginx/nginx.conf
 
 # 环境变量与端口
 ENV DISPLAY=:1 \
     LIBGL_ALWAYS_SOFTWARE=1 \
     NAPCAT_FLAGS=""
 
-EXPOSE 6099 6185 6186
+EXPOSE 7860
 
 # 以无 root 账户运行所有进程（由 supervisord 管理）
 USER user
