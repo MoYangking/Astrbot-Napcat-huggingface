@@ -58,7 +58,7 @@ READINESS_FILE=${READINESS_FILE:-$HIST_DIR/.backup.ready}
 SYNC_LOG_DIR=${SYNC_LOG_DIR:-/home/user/synclogs}
 
 # 备份/管理的目标（相对 BASE）
-TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config home/user/nginx/admin_config.json app/.config/QQ"}
+TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config home/user/nginx/admin_config.json app/.config/QQ home/user/gemini-data home/user/gemini-balance-main/.env"}
 
 # ====== 日志与信号 ======
 LOG() { printf '[%s] [backup] %s\n' "$(date '+%F %T')" "$*"; }
