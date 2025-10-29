@@ -65,7 +65,7 @@ TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config ho
 
 # 备份黑名单（相对 HIST_DIR 的路径，空格分隔；可用环境变量覆盖）
 # 默认排除 AstrBot jm_cosmos 插件数据目录
-EXCLUDE_PATHS=${EXCLUDE_PATHS:-"home/user/AstrBot/data/plugin_data/jm_cosmos"}
+EXCLUDE_PATHS=${EXCLUDE_PATHS:-"home/user/AstrBot/data/plugin_data/jm_cosmos home/user/AstrBot/data/memes_data"}
 
 # ====== 日志与信号 ======
 LOG() { printf '[%s] [backup] %s\n' "$(date '+%F %T')" "$*"; }
