@@ -542,17 +542,12 @@ case "$MODE" in
     ensure_repo; apply_exclude_rules; hydrate_from_pointers ;;
   wait)
     LOG "等待备份初始化完成（仓库/指针/大文件）..."
-    # 等待仓库目录与 .git 出现
-    while [ ! -d "$HIST_DIR/.git" ]; do LOG "等待仓库初始化：$HIST_DIR"; sleep 1; done
+    # 直接执行一次 ensure_repo，确保远端配置与首次拉取可用（自带重试/超时机制）
+    ensure_repo
     apply_exclude_rules || true
-    # 若已配置远端，等待出现可用提交，避免仅在 git init 阶段就放行
-    if git -C "$HIST_DIR" remote | grep -q '^origin$'; then
-      LOG "检测到远端 origin，等待首次拉取完成（HEAD 提交可用）"
-      until git -C "$HIST_DIR" rev-parse --verify HEAD >/dev/null 2>&1; do sleep 1; done
-    fi
-    # 确保链接已建立（即便备份守护未完成初始化，也先行建立软链接以便其后续同步）
+    # 建立软链接以保证后续进程使用历史仓库中的文件
     link_targets
-    # 进行一次指针化与下载尝试，并等待大文件完全就绪
+    # 指针化与下载，并等待所有指针对应的大文件就绪
     pointerize_large_files || true
     hydrate_from_pointers || true
     wait_until_hydrated || true ;;
