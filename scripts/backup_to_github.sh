@@ -14,7 +14,7 @@ LANG=${LANG:-C.UTF-8}
 export LANG
 
 # ====== 模式与基础路径 ======
-MODE=${1:-daemon}        # 支持：init|daemon|monitor|restore
+MODE=${1:-daemon}        # 支持：init|daemon|monitor|restore|wait
 BASE=${BASE:-/}          # 作为相对根目录，统一用绝对路径的相对形式
 
 # 与旧脚本兼容：默认把历史仓库放在 BACKUP_REPO_DIR
@@ -56,12 +56,16 @@ HYDRATE_CHECK_INTERVAL=${HYDRATE_CHECK_INTERVAL:-3}
 HYDRATE_TIMEOUT=${HYDRATE_TIMEOUT:-0}
 
 # 就绪与健康
-READINESS_FILE=${READINESS_FILE:-$HIST_DIR/.backup.ready}
+READINESS_FILE=${READINESS_FILE:-$HIST_DIR/.backup.ready} # 兼容旧逻辑；不再用于判定启动
 # 日志目录（按需写入文件，并同时保留到标准输出）
 SYNC_LOG_DIR=${SYNC_LOG_DIR:-/home/user/synclogs}
 
 # 备份/管理的目标（相对 BASE）
 TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config home/user/nginx/admin_config.json app/.config/QQ home/user/gemini-data home/user/gemini-balance-main/.env"}
+
+# 备份黑名单（相对 HIST_DIR 的路径，空格分隔；可用环境变量覆盖）
+# 默认排除 AstrBot jm_cosmos 插件数据目录
+EXCLUDE_PATHS=${EXCLUDE_PATHS:-"home/user/AstrBot/data/plugin_data/jm_cosmos"}
 
 # ====== 日志与信号 ======
 LOG() { printf '[%s] [backup] %s\n' "$(date '+%F %T')" "$*"; }
@@ -89,6 +93,32 @@ init_logging
 # ====== 工具 ======
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 run_to() { local t=$1; shift || true; if need_cmd timeout; then timeout --preserve-status "$t" "$@"; else "$@"; fi; }
+
+# ====== 黑名单辅助 ======
+is_excluded_rel() {
+  # 参数为相对 HIST_DIR 的路径
+  local rel="$1"; rel="${rel#./}"
+  for ex in $EXCLUDE_PATHS; do
+    ex="${ex#./}"
+    case "$rel" in
+      "$ex"|"$ex"/*) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+ensure_git_exclude_entry() {
+  local rel="$1"; local exfile="$HIST_DIR/.git/info/exclude"
+  mkdir -p "$(dirname "$exfile")" 2>/dev/null || true
+  touch "$exfile"
+  grep -Fxq -- "$rel" "$exfile" 2>/dev/null || echo "$rel" >> "$exfile"
+}
+
+apply_exclude_rules() {
+  for ex in $EXCLUDE_PATHS; do
+    ensure_git_exclude_entry "$ex"
+  done
+}
 urlencode() { local s="$1" o="" c; for ((i=0;i<${#s};i++)); do c=${s:$i:1}; case "$c" in [a-zA-Z0-9._~-]) o+="$c";; ' ') o+="%20";; *) printf -v h '%02X' "'$c"; o+="%$h";; esac; done; printf '%s' "$o"; }
 sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
 file_size() { local f="$1"; [ -f "$f" ] || { echo 0; return 1; }; if stat -c %s "$f" >/dev/null 2>&1; then stat -c %s "$f"; return 0; fi; if stat -f %z "$f" >/dev/null 2>&1; then stat -f %z "$f"; return 0; fi; wc -c < "$f" | tr -d ' '; }
@@ -269,6 +299,7 @@ pointerize_large_files() {
             sz="$(file_size "$f" || echo 0)"; [ "$sz" -ge "$LARGE_THRESHOLD" ] || continue
             sha="$(sha256_of "$f")"; base="$(basename "$f")"; name="${sha}-${base}"
             rel_rel="${f#${HIST_DIR%/}/}"; ptr="$(pointer_path_for "$f")"
+            if is_excluded_rel "$rel_rel"; then continue; fi
             ensure_gitignore_entry "$rel_rel"
             aid="$(gh_find_asset_id "$rid" "$name" || true)"
             if [ -z "$aid" ]; then
@@ -301,6 +332,7 @@ pointerize_large_files() {
       sz="$(file_size "$f" || echo 0)"; [ "$sz" -ge "$LARGE_THRESHOLD" ] || continue
       sha="$(sha256_of "$f")"; base="$(basename "$f")"; name="${sha}-${base}"
       rel_rel="${f#${HIST_DIR%/}/}"; ptr="$(pointer_path_for "$f")"
+      if is_excluded_rel "$rel_rel"; then continue; fi
       ensure_gitignore_entry "$rel_rel"
       aid="$(gh_find_asset_id "$rid" "$name" || true)"
       if [ -z "$aid" ]; then
@@ -320,7 +352,10 @@ pointerize_large_files() {
 }
 
 try_curl_download() {
-  local url="$1"; shift; local outfile="$3"; local allow_retry="$4"; shift 2
+  # 用法：try_curl_download URL OUTFILE ALLOW_RETRY [HEADERS...]
+  local url="$1"; shift
+  local outfile="$1"; shift
+  local allow_retry="$1"; shift
   local headers=("$@")
   local attempt=1
   while :; do
@@ -349,14 +384,19 @@ hydrate_one_pointer() {
 
   local headers=()
   [ -n "$github_secret" ] && headers=(-H "Authorization: Bearer ${github_secret}")
+  # 黑名单直接跳过
+  if is_excluded_rel "$rel"; then
+    LOG "跳过黑名单指针：$rel"
+    return 0
+  fi
   if [ -n "$aid" ]; then
     local api="https://api.github.com/repos/${repo}/releases/assets/${aid}"
-    if ! try_curl_download "$api" "${headers[@]}" "$tmp" true -H "Accept: application/octet-stream"; then
+    if ! try_curl_download "$api" "$tmp" true "${headers[@]}" -H "Accept: application/octet-stream"; then
       ERR "下载 asset_id 失败：$rel"
       rm -f "$tmp"; return 1
     fi
   elif [ -n "$url" ]; then
-    if ! try_curl_download "$url" "${headers[@]}" "$tmp" true; then
+    if ! try_curl_download "$url" "$tmp" true "${headers[@]}"; then
       ERR "下载 URL 失败：$rel"; rm -f "$tmp"; return 1
     fi
   else
@@ -371,7 +411,7 @@ hydrate_one_pointer() {
     if [ -n "$aid2" ]; then
       url_for_dl="https://api.github.com/repos/${repo}/releases/assets/${aid2}"; headers2=(-H "Authorization: Bearer ${github_secret}" -H "Accept: application/octet-stream")
     fi
-    if ! try_curl_download "$url_for_dl" "${headers2[@]}" "$tmp" true; then rm -f "$tmp"; return 1; fi
+    if ! try_curl_download "$url_for_dl" "$tmp" true "${headers2[@]}"; then rm -f "$tmp"; return 1; fi
     [ -n "$size" ] || size="$size2"; [ -n "$sha" ] || sha="$sha2"
   fi
 
@@ -403,6 +443,7 @@ all_pointers_hydrated() {
         total=$((total+1))
         local rel dst size sha
         rel="$(jq -r '.original_path // empty' "$p" 2>/dev/null || echo "")"; dst="${HIST_DIR%/}/$rel"
+        if is_excluded_rel "$rel"; then total=$((total-1)); continue; fi
         size="$(jq -r '.size // 0' "$p" 2>/dev/null || echo 0)"; sha="$(jq -r '.sha256 // empty' "$p" 2>/dev/null || echo "")"
         if [ -f "$dst" ]; then
           local cs; cs="$(file_size "$dst" || echo 0)"
@@ -415,9 +456,11 @@ all_pointers_hydrated() {
       total=$((total+1))
       local p="${root}.pointer" rel dst size sha
       rel="$(jq -r '.original_path // empty' "$p" 2>/dev/null || echo "")"; dst="${HIST_DIR%/}/$rel"; size="$(jq -r '.size // 0' "$p" 2>/dev/null || echo 0)"; sha="$(jq -r '.sha256 // empty' "$p" 2>/dev/null || echo "")"
-      if [ -f "$dst" ]; then
-        local cs; cs="$(file_size "$dst" || echo 0)"
-        if [ "$cs" = "$size" ]; then if [ "$VERIFY_SHA" = "true" ] && [ -n "$sha" ]; then local csha; csha="$(sha256_of "$dst")"; [ "$csha" = "$sha" ] && ok=$((ok+1)); else ok=$((ok+1)); fi; fi
+      if is_excluded_rel "$rel"; then total=$((total-1)); else
+        if [ -f "$dst" ]; then
+          local cs; cs="$(file_size "$dst" || echo 0)"
+          if [ "$cs" = "$size" ]; then if [ "$VERIFY_SHA" = "true" ] && [ -n "$sha" ]; then local csha; csha="$(sha256_of "$dst")"; [ "$csha" = "$sha" ] && ok=$((ok+1)); else ok=$((ok+1)); fi; fi
+        fi
       fi
     fi
   done
@@ -460,18 +503,17 @@ commit_and_push() {
 }
 
 # ====== 主流程 ======
-mark_ready() { mkdir -p "$(dirname "$READINESS_FILE")"; : > "$READINESS_FILE"; }
 healthbeat() { : > "$HIST_DIR/.backup.alive"; }
 
 do_init() {
   ensure_repo
+  apply_exclude_rules || true
   link_targets
   pointerize_large_files || true
   commit_and_push || true
   wait_until_hydrated || true
   chmod -R 777 "$HIST_DIR" || true
-  mark_ready
-  LOG "初始化完成，已写入就绪文件：$READINESS_FILE"
+  LOG "初始化完成（所有指针文件已就绪）"
 }
 
 start_monitor() {
@@ -497,7 +539,12 @@ case "$MODE" in
   monitor)
     start_monitor ;;
   restore)
-    ensure_repo; hydrate_from_pointers; mark_ready ;;
+    ensure_repo; apply_exclude_rules; hydrate_from_pointers ;;
+  wait)
+    LOG "等待备份初始化完成（仓库/指针/大文件）..."
+    while [ ! -d "$HIST_DIR/.git" ]; do LOG "等待仓库初始化：$HIST_DIR"; sleep 1; done
+    apply_exclude_rules || true
+    wait_until_hydrated || true ;;
   *)
     ERR "未知模式：$MODE（应为 init|daemon|monitor|restore）"; exit 2 ;;
 esac

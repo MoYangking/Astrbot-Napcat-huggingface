@@ -6,13 +6,9 @@ set -euo pipefail
 LANG=${LANG:-C.UTF-8}
 export LANG
 
-# 读取与 backup_to_github.sh 相同的默认路径
+# 与 backup_to_github.sh 保持一致的默认路径
 BACKUP_REPO_DIR=${BACKUP_REPO_DIR:-/home/user/.astrbot-backup}
 HIST_DIR=${HIST_DIR:-$BACKUP_REPO_DIR}
-READINESS_FILE=${READINESS_FILE:-}
-if [[ -z "${READINESS_FILE}" ]]; then
-  READINESS_FILE="$HIST_DIR/.backup.ready"
-fi
 BACKUP_WAIT_TIMEOUT=${BACKUP_WAIT_TIMEOUT:-0}  # 0 表示无限等待
 
 log() {
@@ -20,24 +16,25 @@ log() {
 }
 
 wait_for_ready() {
-  local waited=0
-  local step=1
-  log "等待备份初始化完成，检测就绪文件：$READINESS_FILE (超时: ${BACKUP_WAIT_TIMEOUT}s, 0=不超时)"
-  while true; do
-    # 支持多候选路径，兼容不同脚本默认
-    for candidate in "$READINESS_FILE" "$HIST_DIR/.backup.ready" "$BACKUP_REPO_DIR/.backup.ready" "/home/user/.astrbot-backup/.backup.ready"; do
-      if [[ -f "$candidate" ]]; then
-        log "检测到就绪文件：$candidate，继续启动后续进程"
-        return 0
-      fi
-    done
-    if (( BACKUP_WAIT_TIMEOUT > 0 && waited >= BACKUP_WAIT_TIMEOUT )); then
-      log "等待超时(${BACKUP_WAIT_TIMEOUT}s)，继续启动（不再阻塞）"
+  local script="/home/user/scripts/backup_to_github.sh"
+  if [[ ! -x "$script" ]]; then
+    log "未找到等待脚本：$script，跳过等待"
+    return 0
+  fi
+  log "等待备份初始化完成（仓库/指针/大文件）... 超时: ${BACKUP_WAIT_TIMEOUT}s (0=不超时)"
+  if command -v timeout >/dev/null 2>&1 && (( BACKUP_WAIT_TIMEOUT > 0 )); then
+    if timeout --preserve-status "${BACKUP_WAIT_TIMEOUT}s" "$script" wait; then
+      log "备份初始化完成，继续启动"
+      return 0
+    else
+      log "等待超时(${BACKUP_WAIT_TIMEOUT}s)，继续启动"
       return 0
     fi
-    sleep "$step"
-    waited=$((waited+step))
-  done
+  else
+    "$script" wait
+    log "备份初始化完成，继续启动"
+  fi
 }
 
 wait_for_ready
+
