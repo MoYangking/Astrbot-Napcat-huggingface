@@ -422,28 +422,10 @@ commit_and_push() {
 }
 
 # ====== 主流程 ======
-mark_ready() {
-  mkdir -p "$(dirname "$READINESS_FILE")" 2>/dev/null || true
-  local id
-  id="${SESSION_ID:-}"
-  if [ -z "$id" ] && [ -f "$HIST_DIR/.backup.session" ]; then
-    id="$(cat "$HIST_DIR/.backup.session" 2>/dev/null || true)"
-  fi
-  echo "ready:${id:-none}:$(date +%s)" > "$READINESS_FILE"
-}
+mark_ready() { mkdir -p "$(dirname "$READINESS_FILE")"; : > "$READINESS_FILE"; }
 healthbeat() { : > "$HIST_DIR/.backup.alive"; }
 
-# 生成新会话并清理旧的就绪标记，防止在旧标记下过早启动依赖进程
-start_session() {
-  mkdir -p "$HIST_DIR" 2>/dev/null || true
-  rm -f "$READINESS_FILE" 2>/dev/null || true
-  SESSION_ID="$(date +%s).$$"
-  printf '%s' "$SESSION_ID" > "$HIST_DIR/.backup.session"
-  LOG "已创建备份会话：$(cat "$HIST_DIR/.backup.session" 2>/dev/null || echo unknown)"
-}
-
 do_init() {
-  start_session
   ensure_repo
   link_targets
   pointerize_large_files || true

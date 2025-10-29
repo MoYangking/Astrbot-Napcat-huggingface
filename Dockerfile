@@ -61,7 +61,6 @@ RUN python3 -m venv "$VIRTUAL_ENV" && \
     "$VIRTUAL_ENV/bin/pip" install --no-cache-dir socksio pilk \
     "pymilvus>=2.5.4,<3.0.0" \
     "pypinyin>=0.53.0,<1.0.0" \
-    "milvus-lite" \
     "google-genai>=1.11.0,<2.0.0" \
     "fastapi>=0.104.0,<1.0.0" \
     "uvicorn>=0.24.0,<1.0.0" \
