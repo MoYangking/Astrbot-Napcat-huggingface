@@ -57,6 +57,7 @@ Backup/sync (advanced, optional)
 | `STICKY_POINTER` | No | `true` | `true` | Remove original file after pointer generation. |
 | `VERIFY_SHA` | No | `true` | `true` | Verify SHA256 after downloads. |
 | `READINESS_FILE` | No | `${HIST_DIR}/.backup.ready` | `/home/user/.astrbot-backup/.backup.ready` | Signals backup/restore done; other processes wait on it. |
+| `INIT_SYNC_TIMEOUT` | No | `0` | `0` | Initial pull wait timeout (seconds). 0 waits indefinitely; backup init blocks until a successful GitHub fetch/reset completes before signaling readiness. |
 | `SYNC_LOG_DIR` | No | `/home/user/synclogs` | same | Sync log directory. |
 
 NapCat (optional)
@@ -175,4 +176,3 @@ curl -X POST -H "Authorization: Bearer sk-123" -H "Content-Type: application/jso
 
 ## License
 This repo glues upstream projects (each under their own licenses). See upstream repos for details; this repo adds configuration and automation only.
-

@@ -32,6 +32,9 @@ GIT_BRANCH=${GIT_BRANCH:-main}
 GIT_USER_NAME=${GIT_USER_NAME:-astrbot-backup}
 GIT_USER_EMAIL=${GIT_USER_EMAIL:-astrbot-backup@local}
 GIT_OP_TIMEOUT=${GIT_OP_TIMEOUT:-25}
+# 首次同步等待：0 表示无限等待。
+INIT_SYNC_TIMEOUT=${INIT_SYNC_TIMEOUT:-0}
+INIT_SYNC_CHECK_INTERVAL=${INIT_SYNC_CHECK_INTERVAL:-3}
 
 # GitHub（兼容环境变量）：
 # 传入任一组即可：
@@ -126,9 +129,44 @@ ensure_repo() {
     else
       git -C "$HIST_DIR" remote add origin "$url"
     fi
-    run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" fetch --depth=1 origin "$GIT_BRANCH" || true
-    git -C "$HIST_DIR" checkout -B "$GIT_BRANCH" || true
-    run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" pull --depth=1 --rebase --autostash origin "$GIT_BRANCH" || true
+    # 等待首次拉取成功（或确认远端可访问且目标分支不存在），避免后续进程过早启动。
+    local start_ts; start_ts="$(now_ts)"
+    local target_branch="$GIT_BRANCH"
+    while true; do
+      # 远端可访问性检测
+      if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" ls-remote --exit-code origin >/dev/null 2>&1; then
+        # 目标分支是否存在？如不存在，退回到远端默认分支（HEAD）
+        if ! run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" ls-remote --exit-code --heads origin "$GIT_BRANCH" >/dev/null 2>&1; then
+          # 探测远端默认分支
+          local head_line head_ref
+          head_line="$(run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" ls-remote --symref origin HEAD 2>/dev/null || true)"
+          head_ref="$(printf '%s' "$head_line" | awk '/^ref:/{print $2}' | sed 's#refs/heads/##' 2>/dev/null || true)"
+          [ -n "$head_ref" ] && target_branch="$head_ref" || target_branch="$GIT_BRANCH"
+          LOG "远端未找到分支 '$GIT_BRANCH'，使用默认分支 '$target_branch' 进行首次同步"
+        fi
+
+        if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" fetch --depth=1 origin "$target_branch"; then
+          git -C "$HIST_DIR" checkout -B "$target_branch" || true
+          if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" reset --hard "origin/$target_branch"; then
+            LOG "首次拉取完成：origin/$target_branch"
+            # 若目标分支与初始设置不同，则后续逻辑也随之切换
+            GIT_BRANCH="$target_branch"
+            break
+          fi
+        fi
+        LOG "拉取未完成，稍后重试（branch=$target_branch）..."
+      else
+        LOG "无法访问远端仓库，等待网络/凭据可用后重试..."
+      fi
+      if [ "$INIT_SYNC_TIMEOUT" != "0" ]; then
+        local elapsed=$(( $(now_ts) - start_ts ))
+        if [ "$elapsed" -ge "$INIT_SYNC_TIMEOUT" ]; then
+          ERR "首次拉取等待超时(${INIT_SYNC_TIMEOUT}s)，为避免卡死将继续初始化（可能缺少远端最新内容）"
+          break
+        fi
+      fi
+      sleep "$INIT_SYNC_CHECK_INTERVAL"
+    done
   else
     LOG "未配置远端（GITHUB_* 或 github_*），将仅使用本地历史仓库"
     git -C "$HIST_DIR" checkout -B "$GIT_BRANCH" || true
