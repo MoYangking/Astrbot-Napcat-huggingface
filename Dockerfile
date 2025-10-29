@@ -58,13 +58,6 @@ RUN mkdir -p /home/user/AstrBot/data && chown -R 1000:1000 /home/user/AstrBot/da
 RUN python3 -m venv "$VIRTUAL_ENV" && \
     "$VIRTUAL_ENV/bin/pip" install --no-cache-dir --upgrade pip uv && \
     uv pip install -r /home/user/AstrBot/requirements.txt --no-cache-dir && \
-    "$VIRTUAL_ENV/bin/pip" install --no-cache-dir socksio pilk && \
-    chown -R 1000:1000 "$VIRTUAL_ENV"
-
-    # Python deps (use venv to avoid PEP 668)
-    RUN python3 -m venv "$VIRTUAL_ENV" && \
-    "$VIRTUAL_ENV/bin/pip" install --no-cache-dir --upgrade pip uv && \
-    uv pip install -r /home/user/AstrBot/requirements.txt --no-cache-dir && \
     "$VIRTUAL_ENV/bin/pip" install --no-cache-dir socksio pilk \
     "pymilvus>=2.5.4,<3.0.0" \
     "pypinyin>=0.53.0,<1.0.0" \
@@ -75,6 +68,20 @@ RUN python3 -m venv "$VIRTUAL_ENV" && \
     "openai>=1.0.0,<2.0.0" \
     "httpx>=0.25.0,<1.0.0" && \
     chown -R 1000:1000 "$VIRTUAL_ENV"
+
+# Clone and setup Gemini Balance service
+RUN git clone https://github.com/MoYangking/gemini-balance-main /home/user/gemini-balance-main && \
+    chown -R 1000:1000 /home/user/gemini-balance-main && \
+    uv pip install -r /home/user/gemini-balance-main/requirements.txt --no-cache-dir && \
+    chown -R 1000:1000 "$VIRTUAL_ENV"
+
+# Gemini persistent data dir
+RUN mkdir -p /home/user/gemini-data && chown -R 1000:1000 /home/user/gemini-data
+
+# Default env for Gemini (can be overridden at runtime)
+ENV DATABASE_TYPE=sqlite \
+    SQLITE_DATABASE=/home/user/gemini-data/gemini_balance.db \
+    TZ=Asia/Shanghai
 
 
 # NapCat AppImage: extract and keep extracted tree
