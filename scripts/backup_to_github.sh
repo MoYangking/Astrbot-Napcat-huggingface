@@ -163,12 +163,13 @@ link_targets() {
       fi
     fi
 
-    # 无论目标文件是否已存在，都确保原路径是指向历史仓库的符号链接
-    if [ -L "$src" ]; then
-      ln -sfn "$dst" "$src" 2>/dev/null || true
-    elif [ ! -e "$src" ]; then
-      mkdir -p "$(dirname "$src")" 2>/dev/null || true
-      ln -s "$dst" "$src" 2>/dev/null || true
+    if [ -e "$dst" ]; then
+      if [ -L "$src" ]; then
+        ln -sfn "$dst" "$src" 2>/dev/null || true
+      elif [ ! -e "$src" ]; then
+        mkdir -p "$(dirname "$src")" 2>/dev/null || true
+        ln -s "$dst" "$src" 2>/dev/null || true
+      fi
     fi
   done
 }

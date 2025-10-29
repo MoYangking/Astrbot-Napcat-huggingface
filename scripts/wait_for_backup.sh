@@ -15,7 +15,6 @@ if [[ -z "${READINESS_FILE}" ]]; then
 fi
 SESSION_FILE="$HIST_DIR/.backup.session"
 ADMIN_CONFIG="/home/user/nginx/admin_config.json"
-ADMIN_DST="$HIST_DIR/home/user/nginx/admin_config.json"
 BACKUP_WAIT_TIMEOUT=${BACKUP_WAIT_TIMEOUT:-0}  # 0 表示无限等待
 
 log() {
@@ -57,22 +56,13 @@ wait_for_ready() {
     # 支持多候选路径，兼容不同脚本默认
     for candidate in "$READINESS_FILE" "$HIST_DIR/.backup.ready" "$BACKUP_REPO_DIR/.backup.ready" "/home/user/.astrbot-backup/.backup.ready"; do
       if [[ -f "$candidate" ]] && is_ready_for_current_session "$candidate"; then
-        # 放行条件（任意满足）：
-        # 1) 文件已到位；2) 原路径已是符号链接（写入将落入历史仓库）；3) 历史仓库中已存在目标文件
-        if [[ -e "$ADMIN_CONFIG" ]] || [[ -L "$ADMIN_CONFIG" ]] || [[ -e "$ADMIN_DST" ]]; then
-          log "检测到当前会话就绪，关键文件已存在或已建立软链：$candidate"
+        # 关键文件就绪校验：避免 nginx 首次写默认覆盖备份版本
+        if [[ -e "$ADMIN_CONFIG" ]]; then
+          log "检测到当前会话就绪且关键文件已到位：$candidate"
           return 0
+        else
+          log "已就绪但关键文件未到位，继续等待：$ADMIN_CONFIG"
         fi
-        # 若还未建立符号链接，尝试为关键文件建立软链，避免写入默认配置到原路径
-        if [[ ! -e "$ADMIN_CONFIG" && ! -L "$ADMIN_CONFIG" ]]; then
-          mkdir -p "$(dirname "$ADMIN_DST")" "$(dirname "$ADMIN_CONFIG")" 2>/dev/null || true
-          ln -s "$ADMIN_DST" "$ADMIN_CONFIG" 2>/dev/null || true
-          if [[ -L "$ADMIN_CONFIG" ]]; then
-            log "已为关键文件建立软链，准备放行：$ADMIN_CONFIG -> $ADMIN_DST"
-            return 0
-          fi
-        fi
-        log "已就绪但关键文件未到位，继续等待：$ADMIN_CONFIG"
       fi
     done
 
@@ -85,3 +75,4 @@ wait_for_ready() {
 }
 
 wait_for_ready
+
