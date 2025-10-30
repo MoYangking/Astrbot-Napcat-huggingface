@@ -63,7 +63,15 @@ SYNC_LOG_DIR=${SYNC_LOG_DIR:-/home/user/synclogs}
 # 备份/管理的目标（相对 BASE）
 TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config home/user/nginx/admin_config.json app/.config/QQ home/user/gemini-data home/user/gemini-balance-main/.env"}
 
+# 目录型目标（相对 BASE）：用于在仓库中预创建目录并跟踪空目录
+# 可通过环境变量覆盖或追加
+DIRLIKE_TARGETS=${DIRLIKE_TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config app/.config/QQ home/user/gemini-data"}
+
 # 备份黑名单（相对 HIST_DIR 的路径，空格分隔；可用环境变量覆盖）
+# 目录型目标（相对 BASE）：用于在仓库中预创建目录并跟踪空目录
+# 可通过环境变量覆盖或追加
+DIRLIKE_TARGETS=${DIRLIKE_TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config app/.config/QQ home/user/gemini-data"}
+
 # 默认排除 AstrBot jm_cosmos 插件数据目录
 EXCLUDE_PATHS=${EXCLUDE_PATHS:-"home/user/AstrBot/data/plugin_data/jm_cosmos home/user/AstrBot/data/memes_data"}
 
@@ -239,6 +247,32 @@ link_targets() {
         ln -s "$dst" "$src" 2>/dev/null || true
       fi
     fi
+  done
+}
+
+# 预创建目录型目标，以便在首次启动即使源不存在也能建立符号链接
+precreate_dirlike_targets() {
+  for target in $DIRLIKE_TARGETS; do
+    local dst="${HIST_DIR%/}/$target"
+    # 跳过黑名单路径
+    local rel_rel="$target"; if is_excluded_rel "$rel_rel"; then continue; fi
+    mkdir -p "$dst" 2>/dev/null || true
+  done
+}
+
+# 为空目录写入占位文件（.gitkeep），以便 Git 跟踪空目录层级
+track_empty_dirs() {
+  for target in $TARGETS; do
+    local root="${HIST_DIR%/}/$target"
+    [ -d "$root" ] || continue
+    # 查找空目录，排除 .git；对黑名单路径不写入占位
+    find "$root" -type d -empty -not -path '*/.git/*' -print0 2>/dev/null \
+      | while IFS= read -r -d '' d; do
+          local rel_rel="${d#${HIST_DIR%/}/}"
+          if is_excluded_rel "$rel_rel"; then continue; fi
+          : > "$d/.gitkeep"
+          git -C "$HIST_DIR" add -f -- "$rel_rel/.gitkeep" >/dev/null 2>&1 || true
+        done
   done
 }
 
@@ -505,11 +539,40 @@ commit_and_push() {
 # ====== 主流程 ======
 healthbeat() { : > "$HIST_DIR/.backup.alive"; }
 
+DIRLIKE_TARGETS=${DIRLIKE_TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config app/.config/QQ home/user/gemini-data"}
+
+precreate_dirlike_targets() {
+  for target in $DIRLIKE_TARGETS; do
+    local dst="${HIST_DIR%/}/$target"
+    local rel_rel="$target"
+    if is_excluded_rel "$rel_rel"; then continue; fi
+    mkdir -p "$dst" 2>/dev/null || true
+  done
+}
+
+track_empty_dirs() {
+  for target in $TARGETS; do
+    local root="${HIST_DIR%/}/$target"
+    [ -d "$root" ] || continue
+    find "$root" -type d -empty -not -path '*/.git/*' -print0 2>/dev/null \
+      | while IFS= read -r -d '' d; do
+          local rel_rel="${d#${HIST_DIR%/}/}"
+          if is_excluded_rel "$rel_rel"; then continue; fi
+          : > "$d/.gitkeep"
+          git -C "$HIST_DIR" add -f -- "$rel_rel/.gitkeep" >/dev/null 2>&1 || true
+        done
+  done
+}
+
 do_init() {
   ensure_repo
   apply_exclude_rules || true
+  # 预创建目录型目标，保证符号链接可在首次启动前建立
+  precreate_dirlike_targets || true
   link_targets
   pointerize_large_files || true
+  # 跟踪空目录，以便 Git 能保留空目录层级
+  track_empty_dirs || true
   commit_and_push || true
   wait_until_hydrated || true
   chmod -R 777 "$HIST_DIR" || true
@@ -521,7 +584,10 @@ start_monitor() {
   while true; do
     for t in $TARGETS; do process_target "$t"; done
     pointerize_large_files || true
+    track_empty_dirs || true
+    track_empty_dirs || true
     hydrate_from_pointers || true
+    track_empty_dirs || true
     commit_and_push || true
     healthbeat
     [ $STOP_REQUESTED -eq 1 ] && { LOG "检测到停止请求，退出守护循环"; return 0; }
@@ -542,11 +608,17 @@ case "$MODE" in
     ensure_repo; apply_exclude_rules; hydrate_from_pointers ;;
   wait)
     LOG "等待备份初始化完成（仓库/指针/大文件）..."
+    ensure_repo
     # 直接执行一次 ensure_repo，确保远端配置与首次拉取可用（自带重试/超时机制）
     ensure_repo
     apply_exclude_rules || true
+    # 预创建目录型目标以保证后续 link_targets 能建立符号链接
+    precreate_dirlike_targets || true
     # 建立软链接以保证后续进程使用历史仓库中的文件
     link_targets
+    track_empty_dirs || true
+    # 指针化与下载，并等待所有指针对应的大文件就绪
+    pointerize_large_files || true
     # 指针化与下载，并等待所有指针对应的大文件就绪
     pointerize_large_files || true
     hydrate_from_pointers || true
