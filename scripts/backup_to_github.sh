@@ -1,13 +1,22 @@
 #!/usr/bin/env bash
 # -*- coding: utf-8 -*-
-
-# 参考 参考文件/launch.sh 重构：AstrBot/Napcat 数据与配置“历史仓库（history repo）”备份/还原器
-# 特性：
-# - 将目标路径迁移到统一的 Git 历史仓库（HIST_DIR），原路径创建符号链接，避免容器重启数据丢失
-# - 每次循环：优先拉取 -> 指针化大文件(Release 资产) -> 下载指针文件指向的大文件 -> 提交/推送
-# - 首次启动阻塞到数据“就绪”（指针文件均已下载），再通过 READINESS_FILE 放行其它进程
-# - 3 分钟为默认轮询间隔，可通过 BACKUP_INTERVAL_SECONDS 调整
-
+#
+# backup_to_github.sh (patched variant for "pull once + watch & upload")
+# Changes versus the original:
+# - Never delete local large files (ALWAYS_KEEP_LOCAL=true forces STICKY_POINTER=false)
+# - On upload, only after confirming the asset exists and is reachable, then write/update the .pointer
+# - Keep only the latest MAX_ASSET_VERSIONS (default=3) per base filename in the Release
+# - Hydrate fallback: if the exact asset is missing (404/absent), download the immediately previous version
+# - Pull from git only once at init; in monitor mode we DO NOT pull. We watch local changes and upload.
+# - Auto push is disabled by default (AUTO_PUSH=false). You can enable if you really need remote pointer history.
+#
+# Modes: init|daemon|monitor|restore|wait
+#   init     : pull once, link targets, pointerize once, hydrate once, local commit (no push by default)
+#   daemon   : same as init, then enter watch loop (inotify if available; otherwise time-based delta scan)
+#   monitor  : watch loop only (no pull); good for after an init has already run
+#   restore  : hydrate pointers once (with fallback to previous version if needed)
+#   wait     : block until all pointers are hydrated (single pass semantics)
+#
 set -Eeuo pipefail
 
 LANG=${LANG:-C.UTF-8}
@@ -23,9 +32,15 @@ DATA_ROOT=${DATA_ROOT:-$BACKUP_REPO_DIR}
 HIST_DIR=${HIST_DIR:-$BACKUP_REPO_DIR}
 
 # 轮询与阈值
-BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-180}
+BACKUP_INTERVAL_SECONDS=${BACKUP_INTERVAL_SECONDS:-120}
 LARGE_THRESHOLD=${LARGE_THRESHOLD:-52428800} # 50MB
 SCAN_INTERVAL_SECS=${SCAN_INTERVAL_SECS:-$BACKUP_INTERVAL_SECONDS}
+
+# 策略开关
+PULL_POLICY=${PULL_POLICY:-once}            # once|never （init/restore 时有效；monitor/daemon 不再 pull）
+AUTO_PUSH=${AUTO_PUSH:-false}               # 是否自动 push 到远端；默认 false
+ALWAYS_KEEP_LOCAL=${ALWAYS_KEEP_LOCAL:-true}
+MAX_ASSET_VERSIONS=${MAX_ASSET_VERSIONS:-3} # 每个 base 文件名保留的 Release 资产版本数
 
 # Git 基本参数
 GIT_BRANCH=${GIT_BRANCH:-main}
@@ -48,15 +63,15 @@ github_secret=${github_secret:-${GITHUB_PAT:-}}
 
 # Release 资产（大文件指针化）
 RELEASE_TAG=${RELEASE_TAG:-blobs}
-KEEP_OLD_ASSETS=${KEEP_OLD_ASSETS:-false}
-STICKY_POINTER=${STICKY_POINTER:-true}
+KEEP_OLD_ASSETS=${KEEP_OLD_ASSETS:-false}    # 保留旧资产的兼容变量；此版本将由 MAX_ASSET_VERSIONS 控制
+STICKY_POINTER=${STICKY_POINTER:-true}       # 兼容变量；若 ALWAYS_KEEP_LOCAL=true 将被忽略
 VERIFY_SHA=${VERIFY_SHA:-true}
 DOWNLOAD_RETRY=${DOWNLOAD_RETRY:-3}
 HYDRATE_CHECK_INTERVAL=${HYDRATE_CHECK_INTERVAL:-3}
 HYDRATE_TIMEOUT=${HYDRATE_TIMEOUT:-0}
 
 # 就绪与健康
-READINESS_FILE=${READINESS_FILE:-$HIST_DIR/.backup.ready} # 兼容旧逻辑；不再用于判定启动
+READINESS_FILE=${READINESS_FILE:-$HIST_DIR/.backup.ready}
 # 日志目录（按需写入文件，并同时保留到标准输出）
 SYNC_LOG_DIR=${SYNC_LOG_DIR:-/home/user/synclogs}
 
@@ -64,16 +79,10 @@ SYNC_LOG_DIR=${SYNC_LOG_DIR:-/home/user/synclogs}
 TARGETS=${TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config home/user/nginx/admin_config.json app/.config/QQ home/user/gemini-data home/user/gemini-balance-main/.env"}
 
 # 目录型目标（相对 BASE）：用于在仓库中预创建目录并跟踪空目录
-# 可通过环境变量覆盖或追加
 DIRLIKE_TARGETS=${DIRLIKE_TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config app/.config/QQ home/user/gemini-data"}
 
-# 备份黑名单（相对 HIST_DIR 的路径，空格分隔；可用环境变量覆盖）
-# 目录型目标（相对 BASE）：用于在仓库中预创建目录并跟踪空目录
-# 可通过环境变量覆盖或追加
-DIRLIKE_TARGETS=${DIRLIKE_TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config app/.config/QQ home/user/gemini-data"}
-
-# 默认排除 AstrBot jm_cosmos 插件数据目录
-EXCLUDE_PATHS=${EXCLUDE_PATHS:-"home/user/AstrBot/data/plugin_data/jm_cosmos home/user/AstrBot/data/memes_data"}
+# 默认排除目录（相对 HIST_DIR 的路径）
+EXCLUDE_PATHS=${EXCLUDE_PATHS:-"home/user/AstrBot/data/plugin_data/jm_cosmos home/user/AstrBot/data/memes_data /home/user/AstrBot/data/temp"}
 
 # ====== 日志与信号 ======
 LOG() { printf '[%s] [backup] %s\n' "$(date '+%F %T')" "$*"; }
@@ -101,10 +110,13 @@ init_logging
 # ====== 工具 ======
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 run_to() { local t=$1; shift || true; if need_cmd timeout; then timeout --preserve-status "$t" "$@"; else "$@"; fi; }
+urlencode() { local s="$1" o="" c; for ((i=0;i<${#s};i++)); do c=${s:$i:1}; case "$c" in [a-zA-Z0-9._~-]) o+="$c";; ' ') o+="%20";; *) printf -v h '%02X' "'$c"; o+="%$h";; esac; done; printf '%s' "$o"; }
+sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
+file_size() { local f="$1"; [ -f "$f" ] || { echo 0; return 1; }; if stat -c %s "$f" >/dev/null 2>&1; then stat -c %s "$f"; return 0; fi; if stat -f %z "$f" >/dev/null 2>&1; then stat -f %z "$f"; return 0; fi; wc -c < "$f" | tr -d ' '; }
+now_ts() { date +%s; }
 
 # ====== 黑名单辅助 ======
 is_excluded_rel() {
-  # 参数为相对 HIST_DIR 的路径
   local rel="$1"; rel="${rel#./}"
   for ex in $EXCLUDE_PATHS; do
     ex="${ex#./}"
@@ -127,12 +139,8 @@ apply_exclude_rules() {
     ensure_git_exclude_entry "$ex"
   done
 }
-urlencode() { local s="$1" o="" c; for ((i=0;i<${#s};i++)); do c=${s:$i:1}; case "$c" in [a-zA-Z0-9._~-]) o+="$c";; ' ') o+="%20";; *) printf -v h '%02X' "'$c"; o+="%$h";; esac; done; printf '%s' "$o"; }
-sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
-file_size() { local f="$1"; [ -f "$f" ] || { echo 0; return 1; }; if stat -c %s "$f" >/dev/null 2>&1; then stat -c %s "$f"; return 0; fi; if stat -f %z "$f" >/dev/null 2>&1; then stat -f %z "$f"; return 0; fi; wc -c < "$f" | tr -d ' '; }
-now_ts() { date +%s; }
 
-# ====== Git 仓库 ======
+# ====== Git ======
 git_cfg() {
   git -C "$HIST_DIR" config user.name "$GIT_USER_NAME" || true
   git -C "$HIST_DIR" config user.email "$GIT_USER_EMAIL" || true
@@ -141,7 +149,6 @@ git_cfg() {
 }
 
 remote_url() {
-  # 优先使用 GITHUB_USER/GITHUB_PAT/GITHUB_REPO；否则兼容 github_project/github_secret
   if [ -n "$GITHUB_USER" ] && [ -n "$GITHUB_PAT" ] && [ -n "$GITHUB_REPO" ]; then
     printf 'https://%s:%s@github.com/%s.git' "$GITHUB_USER" "$GITHUB_PAT" "$GITHUB_REPO"
   elif [ -n "$github_project" ] && [ -n "$github_secret" ]; then
@@ -167,55 +174,64 @@ ensure_repo() {
     else
       git -C "$HIST_DIR" remote add origin "$url"
     fi
-    # 等待首次拉取成功（或确认远端可访问且目标分支不存在），避免后续进程过早启动。
-    local start_ts; start_ts="$(now_ts)"
-    local target_branch="$GIT_BRANCH"
-    while true; do
-      # 远端可访问性检测
-      if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" ls-remote --exit-code origin >/dev/null 2>&1; then
-        # 目标分支是否存在？如不存在，退回到远端默认分支（HEAD）
-        if ! run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" ls-remote --exit-code --heads origin "$GIT_BRANCH" >/dev/null 2>&1; then
-          # 探测远端默认分支
-          local head_line head_ref
-          head_line="$(run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" ls-remote --symref origin HEAD 2>/dev/null || true)"
-          head_ref="$(printf '%s' "$head_line" | awk '/^ref:/{print $2}' | sed 's#refs/heads/##' 2>/dev/null || true)"
-          [ -n "$head_ref" ] && target_branch="$head_ref" || target_branch="$GIT_BRANCH"
-          LOG "远端未找到分支 '$GIT_BRANCH'，使用默认分支 '$target_branch' 进行首次同步"
+    if [ "$PULL_POLICY" = "once" ]; then
+      # 仅首次拉取一次
+      local start_ts; start_ts="$(now_ts)"
+      local target_branch="$GIT_BRANCH"
+      while true; do
+        if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" ls-remote --exit-code origin >/dev/null 2>&1; then
+          if ! run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" ls-remote --exit-code --heads origin "$GIT_BRANCH" >/dev/null 2>&1; then
+            local head_line head_ref
+            head_line="$(run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" ls-remote --symref origin HEAD 2>/dev/null || true)"
+            head_ref="$(printf '%s' "$head_line" | awk '/^ref:/{print $2}' | sed 's#refs/heads/##' 2>/dev/null || true)"
+            [ -n "$head_ref" ] && target_branch="$head_ref" || target_branch="$GIT_BRANCH"
+            LOG "远端未找到分支 '$GIT_BRANCH'，使用默认分支 '$target_branch' 进行首次同步"
+          fi
+          if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" fetch --depth=1 origin "$target_branch"; then
+            git -C "$HIST_DIR" checkout -B "$target_branch" || true
+            if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" reset --hard "origin/$target_branch"; then
+              LOG "首次拉取完成：origin/$target_branch"; GIT_BRANCH="$target_branch"; break
+            fi
+          fi
+          LOG "拉取未完成，稍后重试（branch=$target_branch）..."
+        else
+          LOG "无法访问远端仓库，等待网络/凭据可用后重试..."
         fi
-
-        if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" fetch --depth=1 origin "$target_branch"; then
-          git -C "$HIST_DIR" checkout -B "$target_branch" || true
-          if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" reset --hard "origin/$target_branch"; then
-            LOG "首次拉取完成：origin/$target_branch"
-            # 若目标分支与初始设置不同，则后续逻辑也随之切换
-            GIT_BRANCH="$target_branch"
+        if [ "$INIT_SYNC_TIMEOUT" != "0" ]; then
+          local elapsed=$(( $(now_ts) - start_ts ))
+          if [ "$elapsed" -ge "$INIT_SYNC_TIMEOUT" ]; then
+            ERR "首次拉取等待超时(${INIT_SYNC_TIMEOUT}s)，将继续初始化（可能缺少远端最新内容）"
             break
           fi
         fi
-        LOG "拉取未完成，稍后重试（branch=$target_branch）..."
-      else
-        LOG "无法访问远端仓库，等待网络/凭据可用后重试..."
-      fi
-      if [ "$INIT_SYNC_TIMEOUT" != "0" ]; then
-        local elapsed=$(( $(now_ts) - start_ts ))
-        if [ "$elapsed" -ge "$INIT_SYNC_TIMEOUT" ]; then
-          ERR "首次拉取等待超时(${INIT_SYNC_TIMEOUT}s)，为避免卡死将继续初始化（可能缺少远端最新内容）"
-          break
-        fi
-      fi
-      sleep "$INIT_SYNC_CHECK_INTERVAL"
-    done
+        sleep "$INIT_SYNC_CHECK_INTERVAL"
+      done
+    else
+      LOG "PULL_POLICY=never：跳过首次拉取"
+      git -C "$HIST_DIR" checkout -B "$GIT_BRANCH" || true
+    fi
   else
     LOG "未配置远端（GITHUB_* 或 github_*），将仅使用本地历史仓库"
     git -C "$HIST_DIR" checkout -B "$GIT_BRANCH" || true
   fi
 }
 
-git_sanitize_repo() {
-  git -C "$HIST_DIR" rebase --abort >/dev/null 2>&1 || true
-  git -C "$HIST_DIR" merge --abort >/dev/null 2>&1 || true
-  git -C "$HIST_DIR" cherry-pick --abort >/dev/null 2>&1 || true
-  rm -rf "$HIST_DIR/.git/rebase-merge" "$HIST_DIR/.git/REBASE_HEAD" "$HIST_DIR/.git/REBASE_APPLY" >/dev/null 2>&1 || true
+commit_local() {
+  git -C "$HIST_DIR" add -A
+  if git -C "$HIST_DIR" diff --cached --quiet; then
+    LOG "工作区无变更，跳过提交"
+    return 0
+  fi
+  git -C "$HIST_DIR" commit -m "auto: $(date '+%Y-%m-%d %H:%M:%S')"
+  LOG "已提交变更（本地）"
+  if [ "$AUTO_PUSH" = "true" ] && git -C "$HIST_DIR" remote | grep -q '^origin$'; then
+    # 按需推送；不再执行 pull（避免回到“拉取-推送循环”）
+    if ! run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" push -u origin "$GIT_BRANCH"; then
+      ERR "push 失败/被拒绝，已保留本地提交"
+    else
+      LOG "push 成功"
+    fi
+  fi
 }
 
 # ====== 目标迁移与链接 ======
@@ -267,42 +283,7 @@ link_targets() {
   done
 }
 
-# 预创建目录型目标，以便在首次启动即使源不存在也能建立符号链接
-precreate_dirlike_targets() {
-  for target in $DIRLIKE_TARGETS; do
-    local dst="${HIST_DIR%/}/$target"
-    # 跳过黑名单路径
-    local rel_rel="$target"; if is_excluded_rel "$rel_rel"; then continue; fi
-    mkdir -p "$dst" 2>/dev/null || true
-  done
-}
-
-# 为空目录写入占位文件（.gitkeep），以便 Git 跟踪空目录层级
-track_empty_dirs() {
-  for target in $TARGETS; do
-    local root="${HIST_DIR%/}/$target"
-    [ -d "$root" ] || continue
-    # 查找空目录，排除 .git；对黑名单路径不写入占位
-    find "$root" -type d -empty -not -path '*/.git/*' -print0 2>/dev/null \
-      | while IFS= read -r -d '' d; do
-          local rel_rel="${d#${HIST_DIR%/}/}"
-          if is_excluded_rel "$rel_rel"; then continue; fi
-          : > "$d/.gitkeep"
-          git -C "$HIST_DIR" add -f -- "$rel_rel/.gitkeep" >/dev/null 2>&1 || true
-        done
-  done
-}
-
-process_target() {
-  local t="$1" src dst
-  src="${BASE%/}/$t"; dst="${HIST_DIR%/}/$t"
-  if [ -e "$src" ] && [ ! -L "$src" ]; then
-    LOG "发现新增：$t"
-    mkdir -p "$(dirname "$dst")"; mv -f "$src" "$dst"; ln -s "$dst" "$src"
-  fi
-}
-
-# ====== Release 资产与指针 ======
+# ====== GitHub Release 资产与指针 ======
 gh_api() {
   local method="$1" url="$2"; shift 2
   local auth=()
@@ -320,10 +301,87 @@ gh_ensure_release() {
   gh_api POST "$api/repos/$github_project/releases" -H "Content-Type: application/json" -d "$payload" | jq -r '.id // empty'
 }
 
+gh_list_assets_json() {
+  local rid="$1"; [ -n "$rid" ] || return 1
+  local api="https://api.github.com"; gh_api GET "$api/repos/$github_project/releases/$rid/assets"
+}
+
 gh_find_asset_id() {
   local rid="$1" name="$2"
   [ -n "$rid" ] || return 1
-  local api="https://api.github.com"; gh_api GET "$api/repos/$github_project/releases/$rid/assets" | jq -r --arg n "$name" '.[] | select(.name==$n) | .id' | head -n1
+  gh_list_assets_json "$rid" | jq -r --arg n "$name" '.[] | select(.name==$n) | .id' | head -n1
+}
+
+gh_delete_asset() {
+  local asset_id="$1"; [ -n "$asset_id" ] || return 1
+  local api="https://api.github.com/repos/${github_project}/releases/assets/${asset_id}"
+  local code; code="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer ${github_secret}" -H "Accept: application/vnd.github+json" "$api")"
+  if [ "$code" = "204" ]; then LOG "删除历史资产：id=$asset_id"; else ERR "删除历史资产失败：id=$asset_id code=$code"; fi
+}
+
+pointer_path_for() { local f="$1"; echo "$f.pointer"; }
+
+# 只在确认上传成功后，再写指针；永远不删除本地大文件
+write_pointer_after_confirm() {
+  local rid="$1" f="$2" rel_rel="$3" size="$4" sha="$5"
+  local base name aid url ptr
+  base="$(basename "$f")"; name="${sha}-${base}"; ptr="$(pointer_path_for "$f")"
+  aid="$(gh_find_asset_id "$rid" "$name" || true)"
+  if [ -z "$aid" ]; then
+    LOG "上传大文件到 Release: $rel_rel ($size bytes)"
+    if ! gh_upload_asset "$rid" "$f" "$name" >/dev/null 2>&1; then
+      ERR "上传失败：$rel_rel"; return 1
+    fi
+    aid="$(gh_find_asset_id "$rid" "$name" || true)"
+    if [ -z "$aid" ]; then ERR "上传确认失败：$rel_rel"; return 1; fi
+  fi
+  url="https://github.com/${github_project}/releases/download/${RELEASE_TAG}/$(urlencode "$name")"
+  # 资源可达性校验（HEAD）
+  if ! curl -sS -I ${github_secret:+-H "Authorization: Bearer ${github_secret}"} "$url" | head -n1 | grep -qE ' 200 | 302 '; then
+    ERR "上传后资源不可用：$rel_rel ($url)"; return 1
+  fi
+  # 写指针（确认成功之后）
+  jq -nc \
+    --arg repo "$github_project" \
+    --arg tag "$RELEASE_TAG" \
+    --arg asset "$name" \
+    --arg asset_id "${aid:-}" \
+    --arg url "$url" \
+    --arg path "$rel_rel" \
+    --arg size "$size" \
+    --arg sha "$sha" '{
+      type:"release-asset", repo:$repo, release_tag:$tag,
+      asset_name:$asset, asset_id:( ($asset_id|tonumber?) // null ),
+      download_url:$url, original_path:$path,
+      size:(($size|tonumber?) // 0), sha256:$sha, generated_at:(now|todate)
+    }' > "$ptr"
+  git -C "$HIST_DIR" add -f "$ptr" || true
+
+  # 永远保留本地原文件：忽略 STICKY_POINTER
+  if [ "$ALWAYS_KEEP_LOCAL" = "true" ]; then :; else :; fi
+
+  # 版本保留策略：每个 base 文件名仅保留最近 MAX_ASSET_VERSIONS 个资产
+  enforce_asset_retention "$rid" "$base" "$MAX_ASSET_VERSIONS" "$name"
+}
+
+enforce_asset_retention() {
+  local rid="$1" base="$2" keep="$3" current_name="$4"
+  [ -n "$rid" ] || return 0
+  local list; list="$(gh_list_assets_json "$rid" || echo '[]')"
+  # 仅匹配形如 "<sha256>-<base>" 的资产名，并按 id 排序（id 越大越新）
+  # 删除多余的旧版本，但不删除当前正在引用的资产
+  echo "$list" | jq -r --arg base "$base" --arg cur "$current_name" --argjson keep "$keep" '
+    [ .[]
+      | select(.name | test("^[0-9a-fA-F]{64}-" + ($base|gsub("\\W"; "\\\\$0")) + "$"))
+      | {id: .id, name: .name}
+    ] | sort_by(.id) as $all
+      | if ($all|length) > $keep
+        then ($all|.[0:(length - $keep)] | map(select(.name != $cur)) | .[].id)
+        else empty
+        end
+  ' | while read -r old_id; do
+    [ -n "$old_id" ] && gh_delete_asset "$old_id"
+  done
 }
 
 gh_upload_asset() {
@@ -333,12 +391,26 @@ gh_upload_asset() {
     "https://uploads.github.com/repos/${github_project}/releases/${rid}/assets?name=$(urlencode "$name")"
 }
 
-pointer_path_for() { local f="$1"; echo "$f.pointer"; }
-
-pointerize_large_files() {
+# 事务式指针化（可按需要传入仅处理的路径）；默认遍历 TARGETS
+pointerize_txn() {
   [ -n "$github_project" ] && [ -n "$github_secret" ] || { LOG "未配置 github_project/github_secret，跳过大文件指针化"; return 0; }
   local rid; rid="$(gh_ensure_release || true)" || rid=""
   [ -n "$rid" ] || { ERR "无法确保 Release：$RELEASE_TAG"; return 1; }
+
+  local only_path="${1:-}"
+  if [ -n "$only_path" ]; then
+    local f="$only_path"
+    if [ -f "$f" ]; then
+      local sz sha rel_rel
+      sz="$(file_size "$f" || echo 0)"; [ "$sz" -ge "$LARGE_THRESHOLD" ] || return 0
+      sha="$(sha256_of "$f")"; rel_rel="${f#${HIST_DIR%/}/}"
+      is_excluded_rel "$rel_rel" && return 0
+      ensure_gitignore_entry "$rel_rel"
+      write_pointer_after_confirm "$rid" "$f" "$rel_rel" "$sz" "$sha" || return 1
+      commit_local || true
+    fi
+    return 0
+  fi
 
   for target in $TARGETS; do
     local root="${HIST_DIR%/}/$target"
@@ -346,64 +418,26 @@ pointerize_large_files() {
     if [ -d "$root" ]; then
       find "$root" -type f -not -name '*.pointer' -not -path '*/.git/*' -print0 2>/dev/null \
         | while IFS= read -r -d '' f; do
-            local sz sha base name aid ptr rel_rel
+            local sz sha rel_rel
             sz="$(file_size "$f" || echo 0)"; [ "$sz" -ge "$LARGE_THRESHOLD" ] || continue
-            sha="$(sha256_of "$f")"; base="$(basename "$f")"; name="${sha}-${base}"
-            rel_rel="${f#${HIST_DIR%/}/}"; ptr="$(pointer_path_for "$f")"
-            if is_excluded_rel "$rel_rel"; then continue; fi
+            sha="$(sha256_of "$f")"; rel_rel="${f#${HIST_DIR%/}/}"
+            is_excluded_rel "$rel_rel" && continue
             ensure_gitignore_entry "$rel_rel"
-            aid="$(gh_find_asset_id "$rid" "$name" || true)"
-            if [ -z "$aid" ]; then
-              LOG "上传大文件到 Release: $rel_rel ($sz bytes)"
-              gh_upload_asset "$rid" "$f" "$name" >/dev/null 2>&1 || true
-              aid="$(gh_find_asset_id "$rid" "$name" || true)"
-            fi
-            local url="https://github.com/${github_project}/releases/download/${RELEASE_TAG}/$(urlencode "$name")"
-            jq -nc \
-              --arg repo "$github_project" \
-              --arg tag "$RELEASE_TAG" \
-              --arg asset "$name" \
-              --arg asset_id "${aid:-}" \
-              --arg url "$url" \
-              --arg path "$rel_rel" \
-              --arg size "$sz" \
-              --arg sha "$sha" '{
-                type:"release-asset", repo:$repo, release_tag:$tag,
-                asset_name:$asset, asset_id:( ($asset_id|tonumber?) // null ),
-                download_url:$url, original_path:$path,
-                size:(($size|tonumber?) // 0), sha256:$sha, generated_at:(now|todate)
-              }' > "$ptr"
-            git -C "$HIST_DIR" add -f "$ptr" || true
-            if [ "$STICKY_POINTER" = "true" ]; then
-              rm -f "$f"
-            fi
+            write_pointer_after_confirm "$rid" "$f" "$rel_rel" "$sz" "$sha" || true
           done
     elif [ -f "$root" ]; then
-      local f="$root" sz sha base name aid ptr rel_rel
+      local f="$root" sz sha rel_rel
       sz="$(file_size "$f" || echo 0)"; [ "$sz" -ge "$LARGE_THRESHOLD" ] || continue
-      sha="$(sha256_of "$f")"; base="$(basename "$f")"; name="${sha}-${base}"
-      rel_rel="${f#${HIST_DIR%/}/}"; ptr="$(pointer_path_for "$f")"
-      if is_excluded_rel "$rel_rel"; then continue; fi
+      sha="$(sha256_of "$f")"; rel_rel="${f#${HIST_DIR%/}/}"
+      is_excluded_rel "$rel_rel" && continue
       ensure_gitignore_entry "$rel_rel"
-      aid="$(gh_find_asset_id "$rid" "$name" || true)"
-      if [ -z "$aid" ]; then
-        LOG "上传大文件到 Release: $rel_rel ($sz bytes)"
-        gh_upload_asset "$rid" "$f" "$name" >/dev/null 2>&1 || true
-        aid="$(gh_find_asset_id "$rid" "$name" || true)"
-      fi
-      local url="https://github.com/${github_project}/releases/download/${RELEASE_TAG}/$(urlencode "$name")"
-      jq -nc --arg repo "$github_project" --arg tag "$RELEASE_TAG" --arg asset "$name" --arg asset_id "${aid:-}" --arg url "$url" --arg path "$rel_rel" --arg size "$sz" --arg sha "$sha" '{
-        type:"release-asset", repo:$repo, release_tag:$tag, asset_name:$asset,
-        asset_id:( ($asset_id|tonumber?) // null ), download_url:$url, original_path:$path, size:(($size|tonumber?) // 0), sha256:$sha, generated_at:(now|todate)
-      }' > "$ptr"
-      git -C "$HIST_DIR" add -f "$ptr" || true
-      if [ "$STICKY_POINTER" = "true" ]; then rm -f "$f"; fi
+      write_pointer_after_confirm "$rid" "$f" "$rel_rel" "$sz" "$sha" || true
     fi
   done
+  commit_local || true
 }
 
 try_curl_download() {
-  # 用法：try_curl_download URL OUTFILE ALLOW_RETRY [HEADERS...]
   local url="$1"; shift
   local outfile="$1"; shift
   local allow_retry="$1"; shift
@@ -417,9 +451,42 @@ try_curl_download() {
   done
 }
 
+# 从当前指针失败时，回退到“上一版本”下载（按 Release asset id 排序）
+download_previous_version() {
+  local repo="$1" tag="$2" base="$3" cur_name="$4" out="$5"
+  local res; res="$(gh_api GET "https://api.github.com/repos/${repo}/releases/tags/${tag}")" || true
+  # 取所有匹配 base 的资产，按 id 排序，找到 cur_name 的前一个
+  local prev_url prev_id
+  prev_url="$(echo "$res" | jq -r --arg base "$base" --arg cur "$cur_name" '
+    .assets // []
+    | map(select(.name | test("^[0-9a-fA-F]{64}-" + ($base|gsub("\\W"; "\\\\$0")) + "$"))) 
+    | sort_by(.id) as $arr
+    | ($arr | map(.name) | index($cur)) as $idx
+    | if ($idx != null and $idx > 0) then ($arr[$idx-1].browser_download_url // empty) else "" end
+  ' 2>/dev/null || echo "")"
+  prev_id="$(echo "$res" | jq -r --arg base "$base" --arg cur "$cur_name" '
+    .assets // []
+    | map(select(.name | test("^[0-9a-fA-F]{64}-" + ($base|gsub("\\W"; "\\\\$0")) + "$")))
+    | sort_by(.id) as $arr
+    | ($arr | map(.name) | index($cur)) as $idx
+    | if ($idx != null and $idx > 0) then ($arr[$idx-1].id // empty) else "" end
+  ' 2>/dev/null || echo "")"
+  [ -z "$prev_url$prev_id" ] && return 1
+
+  local headers2=()
+  [ -n "$github_secret" ] && headers2=(-H "Authorization: Bearer ${github_secret}")
+  if [ -n "$prev_id" ]; then
+    local api="https://api.github.com/repos/${repo}/releases/assets/${prev_id}"
+    headers2=(-H "Authorization: Bearer ${github_secret}" -H "Accept: application/octet-stream")
+    try_curl_download "$api" "$out" true "${headers2[@]}"
+  else
+    try_curl_download "$prev_url" "$out" true "${headers2[@]}"
+  fi
+}
+
 hydrate_one_pointer() {
   local ptr="$1"
-  local rel path repo tag name url size sha aid dst tmp
+  local rel path repo tag name url size sha aid dst tmp base
   rel="$(jq -r '.original_path // empty' "$ptr" 2>/dev/null || echo "")"; [ -n "$rel" ] || return 1
   path="${HIST_DIR%/}/$rel"; repo="$(jq -r '.repo // empty' "$ptr" 2>/dev/null || echo "")"
   tag="$(jq -r '.release_tag // "blobs"' "$ptr" 2>/dev/null)"
@@ -428,6 +495,7 @@ hydrate_one_pointer() {
   size="$(jq -r '.size // 0' "$ptr" 2>/dev/null || echo 0)"
   sha="$(jq -r '.sha256 // empty' "$ptr" 2>/dev/null || echo "")"
   aid="$(jq -r '.asset_id // empty' "$ptr" 2>/dev/null || echo "")"
+  base="$(basename "$name" | sed 's/^[0-9a-fA-F]\{64\}-//')" || base=""
   [ -n "$repo" ] || repo="$github_project"
   [ -n "$repo" ] || { ERR "指针缺少 repo：$ptr"; return 1; }
   mkdir -p "$(dirname "$path")"
@@ -440,37 +508,33 @@ hydrate_one_pointer() {
     LOG "跳过黑名单指针：$rel"
     return 0
   fi
+
+  local ok=0
   if [ -n "$aid" ]; then
     local api="https://api.github.com/repos/${repo}/releases/assets/${aid}"
-    if ! try_curl_download "$api" "$tmp" true "${headers[@]}" -H "Accept: application/octet-stream"; then
-      ERR "下载 asset_id 失败：$rel"
-      rm -f "$tmp"; return 1
-    fi
+    if try_curl_download "$api" "$tmp" true "${headers[@]}" -H "Accept: application/octet-stream"; then ok=1; fi
   elif [ -n "$url" ]; then
-    if ! try_curl_download "$url" "$tmp" true "${headers[@]}"; then
-      ERR "下载 URL 失败：$rel"; rm -f "$tmp"; return 1
-    fi
-  else
-    local res aid2 url2 size2 sha2
-    res="$(gh_api GET "https://api.github.com/repos/${repo}/releases/tags/${tag}")" || true
-    aid2="$(echo "$res" | jq -r --arg n "$name" '.assets // [] | map(select(.name==$n)) | .[-1].id // empty' 2>/dev/null || echo "")"
-    url2="$(echo "$res" | jq -r --arg n "$name" '.assets // [] | map(select(.name==$n)) | .[-1].browser_download_url // empty' 2>/dev/null || echo "")"
-    size2="$(echo "$res" | jq -r --arg n "$name" '.assets // [] | map(select(.name==$n)) | .[-1].size // 0' 2>/dev/null || echo 0)"
-    sha2="$(echo "$res" | jq -r --arg n "$name" '.assets // [] | map(select(.name==$n)) | .[-1].label // empty' 2>/dev/null || echo "")"
-    local url_for_dl="$url2"; local headers2=()
-    [ -n "$github_secret" ] && headers2=(-H "Authorization: Bearer ${github_secret}")
-    if [ -n "$aid2" ]; then
-      url_for_dl="https://api.github.com/repos/${repo}/releases/assets/${aid2}"; headers2=(-H "Authorization: Bearer ${github_secret}" -H "Accept: application/octet-stream")
-    fi
-    if ! try_curl_download "$url_for_dl" "$tmp" true "${headers2[@]}"; then rm -f "$tmp"; return 1; fi
-    [ -n "$size" ] || size="$size2"; [ -n "$sha" ] || sha="$sha2"
+    if try_curl_download "$url" "$tmp" true "${headers[@]}"; then ok=1; fi
   fi
 
-  local got_sz; got_sz="$(file_size "$tmp" || echo 0)"
-  if [ -n "$size" ] && [ "$size" != "0" ] && [ "$got_sz" != "$size" ]; then ERR "大小不匹配：$rel"; rm -f "$tmp"; return 1; fi
-  if [ "$VERIFY_SHA" = "true" ] && [ -n "$sha" ]; then
-    local got_sha; got_sha="$(sha256_of "$tmp")"; [ "$got_sha" = "$sha" ] || { ERR "SHA 不匹配：$rel"; rm -f "$tmp"; return 1; }
+  if [ "$ok" != "1" ]; then
+    LOG "当前版本下载失败，尝试回退到上一版本：$rel"
+    if ! download_previous_version "$repo" "$tag" "$base" "$name" "$tmp"; then
+      ERR "回退下载失败：$rel"
+      rm -f "$tmp"; return 1
+    fi
+    # 回退版本：无法与当前指针的 size/sha 对齐，跳过严格校验，仅记录尺寸
+    local got_sz; got_sz="$(file_size "$tmp" || echo 0)"
+    LOG "已回退下载上一版本（$got_sz bytes）：$rel"
+  else
+    # 正常路径：严格校验
+    local got_sz; got_sz="$(file_size "$tmp" || echo 0)"
+    if [ -n "$size" ] && [ "$size" != "0" ] && [ "$got_sz" != "$size" ]; then ERR "大小不匹配：$rel"; rm -f "$tmp"; return 1; fi
+    if [ "$VERIFY_SHA" = "true" ] && [ -n "$sha" ]; then
+      local got_sha; got_sha="$(sha256_of "$tmp")"; [ "$got_sha" = "$sha" ] || { ERR "SHA 不匹配：$rel"; rm -f "$tmp"; return 1; }
+    fi
   fi
+
   mv -f "$tmp" "$dst"; chmod 0644 "$dst" || true
 }
 
@@ -500,6 +564,9 @@ all_pointers_hydrated() {
           local cs; cs="$(file_size "$dst" || echo 0)"
           if [ "$cs" = "$size" ]; then
             if [ "$VERIFY_SHA" = "true" ] && [ -n "$sha" ]; then local csha; csha="$(sha256_of "$dst")"; [ "$csha" = "$sha" ] && ok=$((ok+1)); else ok=$((ok+1)); fi
+          else
+            # 回退版本尺寸不同，无法通过 size 档位校验；视为未就绪
+            :
           fi
         fi
       done < <(find "$root" -type f -name '*.pointer' -print0 2>/dev/null)
@@ -524,47 +591,80 @@ wait_until_hydrated() {
   while true; do
     hydrate_from_pointers
     local prog; prog="$(all_pointers_hydrated || true)"
-    if all_pointers_hydrated >/dev/null 2>&1; then LOG "数据就绪：$prog"; break; else LOG "进度：$prog，继续等待..."; fi
+    if all_pointers_hydrated >/dev/null 2>&1; then LOG "数据就绪：$prog"; break; else LOG "进度：$prog（含可能回退版本），继续等待..."; fi
     if [ "$HYDRATE_TIMEOUT" != "0" ]; then local elapsed=$(( $(now_ts) - start_ts )); [ "$elapsed" -ge "$HYDRATE_TIMEOUT" ] && { ERR "等待超时（$HYDRATE_TIMEOUT s）"; return 1; }; fi
     sleep "$HYDRATE_CHECK_INTERVAL"
   done
 }
 
-# ====== 提交与推送 ======
-commit_and_push() {
-  git_sanitize_repo
-  git -C "$HIST_DIR" add -A
-  if git -C "$HIST_DIR" diff --cached --quiet; then
-    LOG "工作区无变更，跳过提交"
-  else
-    git -C "$HIST_DIR" commit -m "auto: $(date '+%Y-%m-%d %H:%M:%S')"
-    LOG "已提交变更"
-  fi
-  if git -C "$HIST_DIR" remote | grep -q '^origin$'; then
-    local pushed=0; for attempt in 1 2 3; do
-      run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" fetch --depth=1 origin "$GIT_BRANCH" || true
-      if ! run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" pull --depth=1 --rebase -X ours --autostash origin "$GIT_BRANCH"; then
-        git -C "$HIST_DIR" rebase --abort >/dev/null 2>&1 || true
-        ensure_pointer_merge_config || true
-        run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" pull --no-rebase -X ours --autostash origin "$GIT_BRANCH" || true
-        LOG "pull --rebase 失败（第${attempt}次），重试"
+# ====== 监控：只上传更新，不再拉取 ======
+healthbeat() { : > "$HIST_DIR/.backup.alive"; }
+
+watch_with_inotify() {
+  LOG "使用 inotify 监控本地变化并上传更新（仅处理 ≥ $LARGE_THRESHOLD 字节的文件）"
+  local paths=()
+  for t in $TARGETS; do
+    local root="${HIST_DIR%/}/$t"
+    [ -e "$root" ] && paths+=("$root")
+  done
+  [ ${#paths[@]} -eq 0 ] && { LOG "无可监控路径"; return 0; }
+  inotifywait -m -r -e close_write,move,create "${paths[@]}" --format '%w%f' 2>/dev/null \
+    | while read -r f; do
+        [ -f "$f" ] || continue
+        local rel_rel="${f#${HIST_DIR%/}/}"
+        is_excluded_rel "$rel_rel" && continue
+        local sz; sz="$(file_size "$f" || echo 0)"
+        [ "$sz" -ge "$LARGE_THRESHOLD" ] || continue
+        LOG "检测到变更：$rel_rel ($sz bytes)"
+        pointerize_txn "$f" || true
+        healthbeat
+      done
+}
+
+scan_delta_since() {
+  local since_ts="$1"
+  LOG "缺少 inotify，降级为定时扫描：自 $since_ts 之后的变更"
+  while true; do
+    local now; now="$(now_ts)"
+    for t in $TARGETS; do
+      local root="${HIST_DIR%/}/$t"
+      [ -e "$root" ] || continue
+      if [ -d "$root" ]; then
+        # 查找大于阈值且最近修改的文件
+        find "$root" -type f -not -name '*.pointer' -not -path '*/.git/*' -printf '%T@ %p\n' 2>/dev/null \
+          | awk -v th="$since_ts" '{ if ($1>th) { $1=""; sub(/^ /,""); print } }' \
+          | while read -r f; do
+              [ -f "$f" ] || continue
+              local rel_rel="${f#${HIST_DIR%/}/}"; is_excluded_rel "$rel_rel" && continue
+              local sz; sz="$(file_size "$f" || echo 0)"; [ "$sz" -ge "$LARGE_THRESHOLD" ] || continue
+              LOG "发现最近变更：$rel_rel ($sz bytes)"
+              pointerize_txn "$f" || true
+            done
+      elif [ -f "$root" ]; then
+        local f="$root"; local m; m="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"
+        if [ "$m" -gt "$since_ts" ]; then
+          local rel_rel="${f#${HIST_DIR%/}/}"; is_excluded_rel "$rel_rel" && continue
+          local sz; sz="$(file_size "$f" || echo 0)"; [ "$sz" -ge "$LARGE_THRESHOLD" ] || continue
+          LOG "发现最近变更：$rel_rel ($sz bytes)"
+          pointerize_txn "$f" || true
+        fi
       fi
-      if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" push -u origin "$GIT_BRANCH"; then LOG "推送成功（第${attempt}次）"; pushed=1; break; else LOG "push 失败/被拒绝，重试(${attempt})"; sleep 1; fi
     done
-    [ "$pushed" = 1 ] || ERR "多次重试仍无法推送，已保留本地提交"
-  fi
+    healthbeat
+    since_ts="$now"
+    [ $STOP_REQUESTED -eq 1 ] && break
+    sleep "$SCAN_INTERVAL_SECS"
+  done
 }
 
 # ====== 主流程 ======
-healthbeat() { : > "$HIST_DIR/.backup.alive"; }
-
 DIRLIKE_TARGETS=${DIRLIKE_TARGETS:-"home/user/AstrBot/data home/user/config app/napcat/config app/.config/QQ home/user/gemini-data"}
 
 precreate_dirlike_targets() {
   for target in $DIRLIKE_TARGETS; do
     local dst="${HIST_DIR%/}/$target"
     local rel_rel="$target"
-    if is_excluded_rel "$rel_rel"; then continue; fi
+    is_excluded_rel "$rel_rel" && continue
     mkdir -p "$dst" 2>/dev/null || true
   done
 }
@@ -576,7 +676,7 @@ track_empty_dirs() {
     find "$root" -type d -empty -not -path '*/.git/*' -print0 2>/dev/null \
       | while IFS= read -r -d '' d; do
           local rel_rel="${d#${HIST_DIR%/}/}"
-          if is_excluded_rel "$rel_rel"; then continue; fi
+          is_excluded_rel "$rel_rel" && continue
           : > "$d/.gitkeep"
           git -C "$HIST_DIR" add -f -- "$rel_rel/.gitkeep" >/dev/null 2>&1 || true
         done
@@ -586,36 +686,24 @@ track_empty_dirs() {
 do_init() {
   ensure_repo
   apply_exclude_rules || true
-  # 预创建目录型目标，保证符号链接可在首次启动前建立
   precreate_dirlike_targets || true
   link_targets
-  pointerize_large_files || true
-  # 跟踪空目录，以便 Git 能保留空目录层级
-  track_empty_dirs || true
-  # 设置 .pointer 的自动合并策略，避免自动备份期间冲突卡住
+  # 首次：指针化 + 回填（一次性）
+  pointerize_txn || true
   ensure_pointer_merge_config || true
-  commit_and_push || true
-  wait_until_hydrated || true
+  commit_local || true
+  hydrate_from_pointers || true
   chmod -R 777 "$HIST_DIR" || true
-  LOG "初始化完成（所有指针文件已就绪）"
+  LOG "初始化完成（拉取一次 + 指针化一次 + 回填一次）"
 }
 
 start_monitor() {
-  LOG "进入守护循环：每 ${SCAN_INTERVAL_SECS}s 扫描/同步一次"
-  while true; do
-    for t in $TARGETS; do process_target "$t"; done
-    pointerize_large_files || true
-    track_empty_dirs || true
-    ensure_pointer_merge_config || true
-    ensure_pointer_merge_config || true
-    hydrate_from_pointers || true
-    track_empty_dirs || true
-    commit_and_push || true
-    healthbeat
-    [ $STOP_REQUESTED -eq 1 ] && { LOG "检测到停止请求，退出守护循环"; return 0; }
-    local waited=0; while [ $waited -lt $SCAN_INTERVAL_SECS ]; do [ $STOP_REQUESTED -eq 1 ] && break; sleep 1; waited=$((waited+1)); done
-    [ $STOP_REQUESTED -eq 1 ] && break
-  done
+  LOG "进入监控模式：只拉取一次，后续仅监控本地变化并上传；不再执行定期 pull/push/hydrate 循环"
+  if need_cmd inotifywait; then
+    watch_with_inotify
+  else
+    scan_delta_since "$(now_ts)"
+  fi
 }
 
 case "$MODE" in
@@ -627,24 +715,17 @@ case "$MODE" in
   monitor)
     start_monitor ;;
   restore)
+    # 单次回填（带回退）
     ensure_repo; apply_exclude_rules; hydrate_from_pointers ;;
   wait)
     LOG "等待备份初始化完成（仓库/指针/大文件）..."
     ensure_repo
-    # 直接执行一次 ensure_repo，确保远端配置与首次拉取可用（自带重试/超时机制）
-    ensure_repo
     apply_exclude_rules || true
-    # 预创建目录型目标以保证后续 link_targets 能建立符号链接
     precreate_dirlike_targets || true
-    # 建立软链接以保证后续进程使用历史仓库中的文件
     link_targets
-    track_empty_dirs || true
-    # 指针化与下载，并等待所有指针对应的大文件就绪
-    pointerize_large_files || true
-    # 指针化与下载，并等待所有指针对应的大文件就绪
-    pointerize_large_files || true
+    pointerize_txn || true
     hydrate_from_pointers || true
     wait_until_hydrated || true ;;
   *)
-    ERR "未知模式：$MODE（应为 init|daemon|monitor|restore）"; exit 2 ;;
+    ERR "未知模式：$MODE（应为 init|daemon|monitor|restore|wait）"; exit 2 ;;
 esac
