@@ -221,6 +221,23 @@ git_sanitize_repo() {
 # ====== 目标迁移与链接 ======
 ensure_gitignore_entry() { local rel="$1"; local gi="$HIST_DIR/.gitignore"; touch "$gi"; grep -Fxq -- "$rel" "$gi" || echo "$rel" >> "$gi"; }
 
+ensure_gitattributes_entry() {
+  local pattern="$1"; shift
+  local attrs="$*"
+  local gaf="$HIST_DIR/.gitattributes"
+  mkdir -p "$(dirname "$gaf")" 2>/dev/null || true
+  touch "$gaf"
+  if ! grep -Fqx -- "$pattern $attrs" "$gaf" 2>/dev/null; then
+    echo "$pattern $attrs" >> "$gaf"
+  fi
+  git -C "$HIST_DIR" add -f -- .gitattributes >/dev/null 2>&1 || true
+}
+
+ensure_pointer_merge_config() {
+  git -C "$HIST_DIR" config merge.ours.driver true >/dev/null 2>&1 || true
+  ensure_gitattributes_entry "*.pointer" "merge=ours"
+}
+
 link_targets() {
   for target in $TARGETS; do
     local src dst
@@ -526,8 +543,10 @@ commit_and_push() {
   if git -C "$HIST_DIR" remote | grep -q '^origin$'; then
     local pushed=0; for attempt in 1 2 3; do
       run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" fetch --depth=1 origin "$GIT_BRANCH" || true
-      if ! run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" pull --depth=1 --rebase --autostash origin "$GIT_BRANCH"; then
+      if ! run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" pull --depth=1 --rebase -X ours --autostash origin "$GIT_BRANCH"; then
         git -C "$HIST_DIR" rebase --abort >/dev/null 2>&1 || true
+        ensure_pointer_merge_config || true
+        run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" pull --no-rebase -X ours --autostash origin "$GIT_BRANCH" || true
         LOG "pull --rebase 失败（第${attempt}次），重试"
       fi
       if run_to "$GIT_OP_TIMEOUT" git -C "$HIST_DIR" push -u origin "$GIT_BRANCH"; then LOG "推送成功（第${attempt}次）"; pushed=1; break; else LOG "push 失败/被拒绝，重试(${attempt})"; sleep 1; fi
@@ -573,6 +592,8 @@ do_init() {
   pointerize_large_files || true
   # 跟踪空目录，以便 Git 能保留空目录层级
   track_empty_dirs || true
+  # 设置 .pointer 的自动合并策略，避免自动备份期间冲突卡住
+  ensure_pointer_merge_config || true
   commit_and_push || true
   wait_until_hydrated || true
   chmod -R 777 "$HIST_DIR" || true
@@ -585,7 +606,8 @@ start_monitor() {
     for t in $TARGETS; do process_target "$t"; done
     pointerize_large_files || true
     track_empty_dirs || true
-    track_empty_dirs || true
+    ensure_pointer_merge_config || true
+    ensure_pointer_merge_config || true
     hydrate_from_pointers || true
     track_empty_dirs || true
     commit_and_push || true
