@@ -117,13 +117,22 @@ def push(hist_dir: str, branch: str) -> None:
 
 
 def add_all_and_commit_if_needed(hist_dir: str, message: str) -> bool:
-    """`git add -A` 后若有变更则提交。
+    """`git add -A` 后，仅当“索引中存在变更”才提交。
+
+    说明：有些情况下 `git status --porcelain` 可能显示“工作区未暂存变更”，
+    这会导致直接 `git commit` 报错。为避免守护进程崩溃，改为检测索引差异：
+    使用 `git diff --cached --quiet` 的退出码判断是否有暂存变更（1 表示有差异）。
 
     返回：是否进行了提交。
     """
-    run(["git", "add", "-A"], cwd=hist_dir)
-    diff = run(["git", "status", "--porcelain"], cwd=hist_dir).stdout.strip()
-    if diff:
+    run(["git", "add", "-A"], cwd=hist_dir, check=False)
+    # 0 表示没有差异；1 表示存在差异；其他码为错误
+    proc = run(["git", "diff", "--cached", "--quiet"], cwd=hist_dir, check=False)
+    if proc.returncode == 1:
         run(["git", "commit", "-m", message], cwd=hist_dir)
         return True
-    return False
+    elif proc.returncode == 0:
+        return False
+    else:
+        # diff 命令异常，保守起见不提交
+        return False
