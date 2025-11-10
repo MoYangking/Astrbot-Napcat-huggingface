@@ -6,9 +6,7 @@
 1) 远端准备：保证本地历史仓库存在并配置好 origin；若远端为空则创建初始提交并推送；否则 fetch 落地。
 2) HEAD 对齐：循环直到本地 `HEAD` 与 `origin/<branch>` 完全一致（用 `git rev-parse` 校验）。
 3) 链接阶段：将 BASE 下的目标路径迁移到历史仓库，再在原路径创建符号链接；为空目录写入 `.gitkeep` 并提交一次。
-4) 监控与周期同步：
-   - 若已安装 watchdog，则监听历史仓库目录（排除 .git），有文件事件则触发一次同步；
-   - 无 watchdog 时，依赖固定周期（默认 180s ）执行 pull --rebase → commit（如有）→ push。
+4) 周期同步：固定周期（默认 180 秒）执行 pull --rebase → commit（如有）→ push。
 
 关键特性：
 - 不使用“就绪文件”这种间接信号；而是用 Git 的真实 HEAD 对比保证拉取完成再继续。
@@ -45,7 +43,6 @@ class SyncDaemon:
     def __init__(self, settings: Optional[Settings] = None) -> None:
         self.st = settings or load_settings()
         self.interval = int(os.environ.get("SYNC_INTERVAL", "180"))
-        self._event = threading.Event()  # 文件变更触发
         self._stop = threading.Event()
         self._lock = threading.Lock()  # 保护 git 操作的互斥
         self._last_commit_ts: float = 0.0
@@ -145,41 +142,6 @@ class SyncDaemon:
                 err(f"推送失败：{e}")
         self._last_commit_ts = time.time()
 
-    # -------- 文件监控（可选 watchdog） --------
-    def _watch_thread(self) -> None:
-        """文件系统监控线程。
-
-        优先使用 watchdog 监听 `hist_dir`（排除 .git 目录），
-        任意事件都触发一次“同步请求”。若 watchdog 不可用，则该线程仅记录错误，由主循环依赖周期同步。
-        """
-        try:
-            from watchdog.events import FileSystemEventHandler  # type: ignore
-            from watchdog.observers import Observer  # type: ignore
-
-            class Handler(FileSystemEventHandler):
-                def __init__(self, outer: SyncDaemon) -> None:
-                    self.outer = outer
-
-                def on_any_event(self, event):  # noqa: N802
-                    # 忽略 .git 目录内的事件
-                    if "/.git/" in event.src_path.replace("\\", "/"):
-                        return
-                    # 触发一次同步
-                    self.outer._event.set()
-
-            obs = Observer()
-            obs.schedule(Handler(self), path=self.st.hist_dir, recursive=True)
-            obs.start()
-            log("已启动 watchdog 文件监控")
-            try:
-                while not self._stop.is_set():
-                    time.sleep(1)
-            finally:
-                obs.stop()
-                obs.join(timeout=5)
-        except Exception as e:
-            err(f"watchdog 不可用，使用定时扫描：{e}")
-
     # -------- 主循环 --------
     def run(self) -> int:
         """主运行函数：按步骤拉起守护逻辑并进入循环。"""
@@ -188,26 +150,11 @@ class SyncDaemon:
         self.ensure_remote_ready()
         # 2) 链接与空目录跟踪
         self.link_and_track()
-
-        # 3) 启动监控线程（可选）
-        t = threading.Thread(target=self._watch_thread, daemon=True)
-        t.start()
-
-        # 4) 周期性同步（同时响应事件触发）
+        # 3) 仅按固定周期同步
         while not self._stop.is_set():
-            # 事件触发：尽快同步，但做一个最小间隔防抖
-            if self._event.is_set():
-                self._event.clear()
-                if time.time() - self._last_commit_ts >= 5:
-                    self.pull_commit_push()
-
-            # 周期性同步
             self.pull_commit_push()
-            # 睡眠间隔内，若出现事件则提前醒来
             for _ in range(self.interval):
                 if self._stop.is_set():
-                    break
-                if self._event.is_set():
                     break
                 time.sleep(1)
         return 0

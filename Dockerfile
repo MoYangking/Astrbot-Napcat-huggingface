@@ -64,8 +64,6 @@ RUN python3 -m venv "$VIRTUAL_ENV" && \
     "google-genai>=1.11.0,<2.0.0" \
     "fastapi>=0.104.0,<1.0.0" \
     "uvicorn>=0.24.0,<1.0.0" \
-    "watchdog>=3.0.0,<4.0.0" \
-    "aiofiles>=23.1.0,<24.0.0" \
     "jinja2>=3.1.0,<4.0.0" \
     "openai>=1.0.0,<2.0.0" \
     "httpx>=0.25.0,<1.0.0" && \
