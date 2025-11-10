@@ -1,7 +1,11 @@
 """配置与路径映射
 
-- 读取环境变量：GITHUB_PAT/GITHUB_REPO/HIST_DIR/GIT_BRANCH/SYNC_TARGETS/EXCLUDE_PATHS
-- 提供将 BASE 相对路径映射为绝对路径、历史仓库内部路径的工具函数
+职责：
+- 读取环境变量（GITHUB_PAT/GITHUB_REPO/HIST_DIR/GIT_BRANCH/SYNC_TARGETS/EXCLUDE_PATHS）。
+- 从 `HIST_DIR/sync-config.json` 读取目标与黑名单覆盖项（若存在）。
+- 提供路径映射工具：
+  - `to_abs_under_base(base, rel)`: BASE 相对路径 → 绝对路径；
+  - `to_under_hist(hist, rel)`: BASE 相对路径 → 历史仓库下的镜像路径。
 """
 
 import os
@@ -59,7 +63,13 @@ class Settings:
 
 
 def _load_file_overrides(hist_dir: str) -> Dict[str, Any]:
-    """从 HIST_DIR/sync-config.json 读取覆盖项（若存在）。"""
+    """从 `HIST_DIR/sync-config.json` 读取覆盖项（若存在）。
+
+    返回一个 dict，可包含：
+    - targets: List[str]
+    - excludes: List[str]
+    任何异常或不存在时返回空对象。
+    """
     import json
 
     cfg_path = os.path.join(hist_dir, "sync-config.json")
@@ -76,7 +86,10 @@ def _load_file_overrides(hist_dir: str) -> Dict[str, Any]:
 
 
 def save_file_overrides(hist_dir: str, data: Dict[str, Any]) -> None:
-    """写入覆盖项到 HIST_DIR/sync-config.json。"""
+    """写入覆盖项到 `HIST_DIR/sync-config.json`。
+
+    参数 data 应包含 `targets` 与/或 `excludes`。
+    """
     import json
 
     os.makedirs(hist_dir, exist_ok=True)
@@ -86,6 +99,11 @@ def save_file_overrides(hist_dir: str, data: Dict[str, Any]) -> None:
 
 
 def load_settings() -> Settings:
+    """加载运行时配置。
+
+    优先级：环境变量默认值 → 文件覆盖（仅 targets/excludes）。
+    返回 Settings 数据类实例。
+    """
     base = DEFAULT_BASE.rstrip("/") or "/"
     hist_dir = os.path.abspath(DEFAULT_HIST_DIR)
     branch = DEFAULT_BRANCH

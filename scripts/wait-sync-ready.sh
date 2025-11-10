@@ -10,6 +10,7 @@ set -Eeuo pipefail
 BASE=${BASE:-/}
 HIST_DIR=${HIST_DIR:-/home/user/.astrbot-backup}
 BRANCH=${GIT_BRANCH:-main}
+declare -a TARGETS=()
 
 DEFAULT_TARGETS=(
   home/user/AstrBot/data
@@ -34,7 +35,7 @@ load_targets() {
   if [[ -f "$cfg" ]] && command -v jq >/dev/null 2>&1; then
     mapfile -t TARGETS < <(jq -r 'try .targets[] // empty' "$cfg" 2>/dev/null | sed 's#^/##') || true
   fi
-  if [[ ${#TARGETS[@]:-0} -eq 0 ]]; then
+  if (( ${#TARGETS[@]} == 0 )); then
     TARGETS=("${DEFAULT_TARGETS[@]}")
   fi
 }
@@ -75,4 +76,3 @@ for _ in {1..30}; do
 done
 log "符号链接未全部就绪，先继续启动（守护进程稍后会完成）"
 exit 0
-

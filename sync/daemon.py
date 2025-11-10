@@ -1,17 +1,21 @@
 """Sync Daemon
 ----------------
-单进程守护：
-1) 启动时确保仓库可用：初始化/设置远端/判断空仓/拉取并硬重置到远端分支；
-2) 目录迁移与符号链接；空目录 .gitkeep 跟踪；提交并推送一次；
-3) 启动文件监控（若安装 watchdog）；否则使用周期性扫描；
-4) 循环任务：每 `SYNC_INTERVAL` 秒拉取(rebase)→提交→推送；出现文件事件时会尽快提交。
+单进程守护，覆盖从“首次初始化/拉取/对齐”到“目录迁移 + 软链”再到“持续同步”的全流程。
 
-不再使用“就绪文件”判定是否完成；改为在启动阶段同步阻塞，直到：
-- 远端可达，并完成 fetch；
-- 本地 HEAD 与远端 `origin/<branch>` 对齐（通过 rev-parse 校验）。
+工作步骤（按启动顺序）：
+1) 远端准备：保证本地历史仓库存在并配置好 origin；若远端为空则创建初始提交并推送；否则 fetch 落地。
+2) HEAD 对齐：循环直到本地 `HEAD` 与 `origin/<branch>` 完全一致（用 `git rev-parse` 校验）。
+3) 链接阶段：将 BASE 下的目标路径迁移到历史仓库，再在原路径创建符号链接；为空目录写入 `.gitkeep` 并提交一次。
+4) 监控与周期同步：
+   - 若已安装 watchdog，则监听历史仓库目录（排除 .git），有文件事件则触发一次同步；
+   - 无 watchdog 时，依赖固定周期（默认 180s ）执行 pull --rebase → commit（如有）→ push。
 
-环境变量：
-- SYNC_INTERVAL（默认 180 秒）
+关键特性：
+- 不使用“就绪文件”这种间接信号；而是用 Git 的真实 HEAD 对比保证拉取完成再继续。
+- 链接在拉取完成之后执行，避免“半拉取状态”破坏本地数据。
+
+可调环境变量：
+- SYNC_INTERVAL：周期同步间隔（秒），默认 180。
 """
 
 from __future__ import annotations
@@ -29,7 +33,14 @@ from sync.utils.logging import err, log
 
 
 class SyncDaemon:
-    """执行初始化、文件链接、空目录跟踪，并周期性同步到 GitHub 的守护进程。"""
+    """同步守护进程。
+
+    - settings: 运行时配置，默认从环境和配置文件加载。
+    - interval: 周期同步间隔（秒），ENV SYNC_INTERVAL 可覆盖。
+    - _event/_stop: 线程通信事件；文件变更触发同步、停止标记。
+    - _lock: 保护 Git 操作的互斥锁，避免并发 pull/commit/push。
+    - _last_commit_ts: 上次提交/推送的时间戳，用于简单的防抖。
+    """
 
     def __init__(self, settings: Optional[Settings] = None) -> None:
         self.st = settings or load_settings()
@@ -44,7 +55,13 @@ class SyncDaemon:
         return f"https://x-access-token:{self.st.github_pat}@github.com/{self.st.github_repo}.git"
 
     def ensure_remote_ready(self) -> None:
-        """阻塞直到远端可访问，且本地已拉取并对齐到远端分支。"""
+        """阻塞直到远端可访问，且本地已拉取并对齐到远端分支。
+
+        行为：
+        - 若远端为空，创建初始提交并推送。
+        - 若远端已有内容，fetch 并 checkout + reset 到远端分支。
+        - 校验本地/远端 HEAD 一致，才返回；否则 3s 后重试。
+        """
         if not self.st.github_repo or not self.st.github_pat:
             raise RuntimeError("GITHUB_REPO/GITHUB_PAT 未配置")
 
@@ -73,7 +90,11 @@ class SyncDaemon:
             time.sleep(3)
 
     def _head_matches_origin(self) -> bool:
-        """HEAD 与 origin/<branch> 是否一致。"""
+        """HEAD 与 origin/<branch> 是否一致。
+
+        返回 True 表示“拉取完成且本地已对齐远端”。
+        失败或异常返回 False。
+        """
         try:
             h1 = git_ops.run(["git", "rev-parse", "HEAD"], cwd=self.st.hist_dir).stdout.strip()
             h2 = git_ops.run(["git", "rev-parse", f"origin/{self.st.branch}"], cwd=self.st.hist_dir).stdout.strip()
@@ -83,6 +104,7 @@ class SyncDaemon:
 
     # -------- 迁移与链接、空目录跟踪 --------
     def link_and_track(self) -> None:
+        """执行目录/文件迁移 + 符号链接、空目录跟踪和一次性提交推送。"""
         log("预创建目录型目标")
         precreate_dirlike(self.st.hist_dir, self.st.targets)
         log("迁移并创建符号链接")
@@ -102,7 +124,12 @@ class SyncDaemon:
 
     # -------- 同步循环 --------
     def pull_commit_push(self) -> None:
-        """一次完整的同步周期：先拉取(rebase)，再提交，再推送。"""
+        """一次完整的同步周期：先拉取(rebase)，再提交，再推送。
+
+        - 使用 `git pull --rebase` 尽量维持线性历史；
+        - 检测有变更才提交；
+        - push 失败并不会中断守护，仅记录日志等待下次重试。
+        """
         with self._lock:
             # 尝试变基拉取以避免分叉
             git_ops.run(["git", "pull", "--rebase", "origin", self.st.branch], cwd=self.st.hist_dir, check=False)
@@ -120,7 +147,11 @@ class SyncDaemon:
 
     # -------- 文件监控（可选 watchdog） --------
     def _watch_thread(self) -> None:
-        """尝试使用 watchdog 监听 hist_dir（排除 .git）; 失败则不启用。"""
+        """文件系统监控线程。
+
+        优先使用 watchdog 监听 `hist_dir`（排除 .git 目录），
+        任意事件都触发一次“同步请求”。若 watchdog 不可用，则该线程仅记录错误，由主循环依赖周期同步。
+        """
         try:
             from watchdog.events import FileSystemEventHandler  # type: ignore
             from watchdog.observers import Observer  # type: ignore
@@ -151,6 +182,7 @@ class SyncDaemon:
 
     # -------- 主循环 --------
     def run(self) -> int:
+        """主运行函数：按步骤拉起守护逻辑并进入循环。"""
         log("启动 sync 守护进程…")
         # 1) 远端准备并对齐
         self.ensure_remote_ready()
@@ -182,6 +214,5 @@ class SyncDaemon:
 
 
 def run_daemon() -> int:
-    """入口函数：创建并运行守护进程。"""
+    """入口函数：创建并运行守护进程（供外部调用）。"""
     return SyncDaemon().run()
-

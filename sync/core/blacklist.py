@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 """黑名单：
-基于相对 HIST_DIR 的路径前缀匹配，用于排除提交。
-同时写入 `.git/info/exclude`，使 `git add -A` 忽略这些路径。
+
+职责：
+- 基于“相对 HIST_DIR”的路径前缀匹配，用于排除提交；
+- 将黑名单写入 `.git/info/exclude`，使 `git add -A` 自动忽略这些路径。
 """
 
 import os
@@ -12,6 +14,10 @@ from sync.utils.logging import log
 
 
 def is_excluded(rel_under_hist: str, excludes: Iterable[str]) -> bool:
+    """判断给定路径（相对 HIST_DIR）是否命中黑名单。
+
+    前缀匹配（`a/b` 将命中 `a/b` 与其子路径）。
+    """
     # Normalize and compare path-prefix-wise
     rel = rel_under_hist.strip("./")
     for ex in excludes:
@@ -22,6 +28,7 @@ def is_excluded(rel_under_hist: str, excludes: Iterable[str]) -> bool:
 
 
 def ensure_git_info_exclude(hist_dir: str, excludes: Iterable[str]) -> None:
+    """确保 `.git/info/exclude` 中包含所有黑名单条目（幂等追加）。"""
     exfile = os.path.join(hist_dir, ".git", "info", "exclude")
     os.makedirs(os.path.dirname(exfile), exist_ok=True)
     try:

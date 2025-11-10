@@ -3,9 +3,12 @@ from __future__ import annotations
 """Git 子进程操作封装
 
 职责：
-- 初始化仓库、设置远端、判断远端空仓
-- 拉取并对齐到远端分支
-- add/commit/push 常用操作
+- 初始化仓库、设置远端、判断远端空仓；
+- 拉取并对齐到远端分支（含默认分支探测）；
+- add/commit/push 常用操作与简单的状态检测。
+
+所有函数通过 `subprocess.run` 调用系统 git，避免引入额外依赖。
+失败时抛出 `GitError`（除非显式 `check=False`）。
 """
 
 import os
@@ -20,6 +23,13 @@ class GitError(RuntimeError):
 
 
 def run(cmd: List[str], cwd: Optional[str] = None, check: bool = True) -> subprocess.CompletedProcess:
+    """运行子进程命令。
+
+    - cmd: 命令及参数列表；
+    - cwd: 工作目录；
+    - check: True 时非零退出码将抛出 `GitError`。
+    返回 CompletedProcess。
+    """
     proc = subprocess.run(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if check and proc.returncode != 0:
         raise GitError(f"Command failed: {' '.join(cmd)}\nstdout: {proc.stdout}\nstderr: {proc.stderr}")
@@ -27,6 +37,7 @@ def run(cmd: List[str], cwd: Optional[str] = None, check: bool = True) -> subpro
 
 
 def ensure_repo(hist_dir: str, branch: str) -> None:
+    """确保 `hist_dir` 已初始化为 Git 仓库，并设置为安全目录。"""
     os.makedirs(hist_dir, exist_ok=True)
     if not os.path.isdir(os.path.join(hist_dir, ".git")):
         log(f"Initializing git repo at {hist_dir}")
@@ -36,9 +47,16 @@ def ensure_repo(hist_dir: str, branch: str) -> None:
         run(["git", "config", "--global", "--add", "safe.directory", hist_dir], cwd=hist_dir, check=False)
     except Exception:
         pass
+    # Ensure commit identity (local repo scope) and rebase policy
+    name = os.environ.get("GIT_USER_NAME", "sync-bot")
+    email = os.environ.get("GIT_USER_EMAIL", "sync-bot@local")
+    run(["git", "config", "user.name", name], cwd=hist_dir, check=False)
+    run(["git", "config", "user.email", email], cwd=hist_dir, check=False)
+    run(["git", "config", "pull.rebase", "true"], cwd=hist_dir, check=False)
 
 
 def set_remote(hist_dir: str, url: str) -> None:
+    """设置或更新 origin 远端 URL（不会输出敏感 Token 到日志）。"""
     url_masked = mask_token(url)
     # add or update origin
     remotes = run(["git", "remote"], cwd=hist_dir).stdout.strip().splitlines()
@@ -51,6 +69,7 @@ def set_remote(hist_dir: str, url: str) -> None:
 
 
 def remote_is_empty(hist_dir: str) -> bool:
+    """远端是否为空仓（无 heads 且无任何 refs）。"""
     # No heads and no refs means empty
     heads = run(["git", "ls-remote", "--heads", "origin"], cwd=hist_dir, check=False).stdout.strip()
     all_refs = run(["git", "ls-remote", "origin"], cwd=hist_dir, check=False).stdout.strip()
@@ -58,6 +77,7 @@ def remote_is_empty(hist_dir: str) -> bool:
 
 
 def fetch_and_checkout(hist_dir: str, branch: str) -> None:
+    """fetch 远端并将工作区对齐到目标分支（或远端默认分支）。"""
     # Fetch; if branch not present, fall back to remote HEAD
     run(["git", "fetch", "--depth=1", "origin"], cwd=hist_dir)
     # Try target branch first
@@ -79,6 +99,7 @@ def fetch_and_checkout(hist_dir: str, branch: str) -> None:
 
 
 def initial_commit_if_needed(hist_dir: str) -> None:
+    """若仓库尚无提交，写入一个最小 README 并提交。"""
     # Create a minimal file if repo is empty
     status = run(["git", "rev-parse", "--verify", "HEAD"], cwd=hist_dir, check=False)
     if status.returncode != 0:
@@ -91,10 +112,15 @@ def initial_commit_if_needed(hist_dir: str) -> None:
 
 
 def push(hist_dir: str, branch: str) -> None:
+    """执行 `git push -u origin <branch>`。"""
     run(["git", "push", "-u", "origin", branch], cwd=hist_dir)
 
 
 def add_all_and_commit_if_needed(hist_dir: str, message: str) -> bool:
+    """`git add -A` 后若有变更则提交。
+
+    返回：是否进行了提交。
+    """
     run(["git", "add", "-A"], cwd=hist_dir)
     diff = run(["git", "status", "--porcelain"], cwd=hist_dir).stdout.strip()
     if diff:
