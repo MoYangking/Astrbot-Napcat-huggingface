@@ -64,6 +64,8 @@ RUN python3 -m venv "$VIRTUAL_ENV" && \
     "google-genai>=1.11.0,<2.0.0" \
     "fastapi>=0.104.0,<1.0.0" \
     "uvicorn>=0.24.0,<1.0.0" \
+    "watchdog>=3.0.0,<4.0.0" \
+    "aiofiles>=23.1.0,<24.0.0" \
     "jinja2>=3.1.0,<4.0.0" \
     "openai>=1.0.0,<2.0.0" \
     "httpx>=0.25.0,<1.0.0" && \
@@ -105,18 +107,18 @@ RUN mkdir -p \
       /home/user/nginx/tmp/scgi \
     && chown -R 1000:1000 /home/user/nginx
 
+# Sync service (daemon + web)
+COPY --chown=1000:1000 sync /home/user/sync
+COPY --chown=1000:1000 sync_to_github.py /home/user/sync_to_github.py
+RUN chmod +x /home/user/sync_to_github.py && chown -R 1000:1000 /home/user/sync
+
 # NapCat runtime dirs and launcher
 RUN mkdir -p /app/.config/QQ /app/napcat/config && chown -R 1000:1000 /app
 RUN mkdir -p /home/user/scripts && chown -R 1000:1000 /home/user/scripts
 COPY --chown=1000:1000 scripts/run-napcat.sh /home/user/scripts/run-napcat.sh
-COPY --chown=1000:1000 scripts/backup_to_github.sh /home/user/scripts/backup_to_github.sh
-COPY --chown=1000:1000 scripts/wait_for_backup.sh /home/user/scripts/wait_for_backup.sh
-RUN chmod +x /home/user/scripts/run-napcat.sh \
-    && chmod +x /home/user/scripts/backup_to_github.sh \
-    && chmod +x /home/user/scripts/wait_for_backup.sh
-
-# Log directory for sync script
-RUN mkdir -p /home/user/synclogs && chown -R 1000:1000 /home/user/synclogs
+COPY --chown=1000:1000 scripts/wait-sync-ready.sh /home/user/scripts/wait-sync-ready.sh
+RUN chmod +x /home/user/scripts/run-napcat.sh
+RUN chmod +x /home/user/scripts/wait-sync-ready.sh
 
 # Env and ports
 ENV DISPLAY=:1 \

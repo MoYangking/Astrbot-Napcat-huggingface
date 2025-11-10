@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sync 管理</title>
+    <style>
+      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;padding:20px;background:#0b1220;color:#e4e7ec}
+      .wrap{max-width:960px;margin:0 auto}
+      .card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:16px;margin-bottom:16px}
+      button{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:8px 12px;cursor:pointer}
+      button:disabled{background:#334155;cursor:not-allowed}
+      code{background:#0f172a;padding:2px 6px;border-radius:6px}
+      table{width:100%;border-collapse:collapse}
+      td,th{border-bottom:1px solid #1f2937;padding:8px;text-align:left}
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h2>Sync 管理</h2>
+
+      <div class="card">
+        <button id="btnInit">执行初始化</button>
+        <button id="btnSync">立即同步</button>
+        <button id="btnPull">仅拉取</button>
+        <button id="btnPush">仅推送</button>
+        <button id="btnRelink">重新链接</button>
+        <button id="btnTrack">跟踪空目录</button>
+        <button id="btnRefresh">刷新状态</button>
+      </div>
+
+      <div class="card">
+        <h3>状态</h3>
+        <pre id="status">加载中...</pre>
+      </div>
+
+      <div class="card">
+        <h3>目标与黑名单</h3>
+        <div style="display:flex; gap:16px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:300px;">
+            <h4>同步目标 (每行一个，相对 BASE)</h4>
+            <textarea id="txtTargets" style="width:100%;height:120px"></textarea>
+            <div style="margin-top:8px"><button id="btnSaveTargets">保存目标</button></div>
+          </div>
+          <div style="flex:1; min-width:300px;">
+            <h4>黑名单 (每行一个，相对 HIST_DIR)</h4>
+            <textarea id="txtExcludes" style="width:100%;height:120px"></textarea>
+            <div style="margin-top:8px"><button id="btnSaveExcludes">保存黑名单</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>说明</h3>
+        <ul>
+          <li>环境变量 <code>GITHUB_PAT</code>, <code>GITHUB_REPO</code> 必须已配置。</li>
+          <li>启动后后台每 3 分钟自动提交/推送；也可点击“立即同步”。</li>
+          <li>黑名单相对 <code>HIST_DIR</code>，可在此页面修改并即时生效。</li>
+        </ul>
+      </div>
+    </div>
+    <script>
+      async function loadStatus(){
+        const res = await fetch('/sync/api/status');
+        const j = await res.json();
+        document.getElementById('status').textContent = JSON.stringify(j,null,2);
+        // populate editors
+        if (Array.isArray(j.targets)) document.getElementById('txtTargets').value = j.targets.join('\n');
+        if (Array.isArray(j.excludes)) document.getElementById('txtExcludes').value = j.excludes.join('\n');
+      }
+      async function post(path, body){
+        const res = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined});
+        return res.json();
+      }
+      async function doInit(btn){
+        btn.disabled = true;
+        try{
+          const j = await post('/sync/api/init');
+          alert(j.ok? '初始化完成' : ('失败: '+(j.error||'未知错误')));
+          await loadStatus();
+        }catch(e){
+          alert('请求失败: '+e);
+        }finally{
+          btn.disabled = false;
+        }
+      }
+      async function doSimple(btn, path, okMsg){
+        btn.disabled = true;
+        try{ const j = await post(path); alert(j.ok? okMsg : ('失败: '+(j.error||'未知错误'))); await loadStatus(); }
+        catch(e){ alert('请求失败: '+e); }
+        finally{ btn.disabled = false; }
+      }
+      async function saveTargets(btn){
+        btn.disabled = true;
+        try{
+          const lines = document.getElementById('txtTargets').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+          const j = await post('/sync/api/targets', {targets: lines});
+          alert(j.ok? '已保存' : ('失败: '+(j.error||'未知错误')));
+          await loadStatus();
+        }catch(e){ alert('请求失败: '+e); }
+        finally{ btn.disabled = false; }
+      }
+      async function saveExcludes(btn){
+        btn.disabled = true;
+        try{
+          const lines = document.getElementById('txtExcludes').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
+          const j = await post('/sync/api/excludes', {excludes: lines});
+          alert(j.ok? '已保存' : ('失败: '+(j.error||'未知错误')));
+          await loadStatus();
+        }catch(e){ alert('请求失败: '+e); }
+        finally{ btn.disabled = false; }
+      }
+      document.getElementById('btnInit').onclick = (e)=>doInit(e.target);
+      document.getElementById('btnSync').onclick = (e)=>doSimple(e.target,'/sync/api/sync-now','已执行同步');
+      document.getElementById('btnPull').onclick = (e)=>doSimple(e.target,'/sync/api/pull','已拉取');
+      document.getElementById('btnPush').onclick = (e)=>doSimple(e.target,'/sync/api/push','已推送');
+      document.getElementById('btnRelink').onclick = (e)=>doSimple(e.target,'/sync/api/relink','已重新链接');
+      document.getElementById('btnTrack').onclick = (e)=>doSimple(e.target,'/sync/api/track-empty','已执行空目录跟踪');
+      document.getElementById('btnRefresh').onclick = ()=>loadStatus();
+      document.getElementById('btnSaveTargets').onclick = (e)=>saveTargets(e.target);
+      document.getElementById('btnSaveExcludes').onclick = (e)=>saveExcludes(e.target);
+      loadStatus();
+    </script>
+  </body>
+  </html>

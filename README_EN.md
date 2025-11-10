@@ -1,6 +1,6 @@
 # AstrBot + NapCat + Gemini Balance on Hugging Face
 
-This repo packages AstrBot (agent chatbot), NapCat (QQ/OneBot bridge), and Gemini Balance (Gemini proxy/load balancer) behind an OpenResty (nginx + Lua) gateway. It targets both local Docker and Hugging Face Spaces (Docker SDK). Processes are orchestrated by `supervisord`, and a GitHub repo is used to persist data/config so Spaces restarts don’t wipe state.
+This repo packages AstrBot (agent chatbot), NapCat (QQ/OneBot bridge), and Gemini Balance (Gemini proxy/load balancer) behind an OpenResty (nginx + Lua) gateway. It targets both local Docker and Hugging Face Spaces (Docker SDK). Processes are orchestrated by `supervisord`.
 
 Upstreams:
 - AstrBot: https://github.com/AstrBotDevs/AstrBot
@@ -21,50 +21,19 @@ Default routes (on 7860):
 
 Layout:
 - `Dockerfile` — build all deps and clone upstream apps
-- `supervisor/supervisord.conf` — backup, Xvfb, NapCat, AstrBot, Gemini, nginx
+- `supervisor/supervisord.conf` — Xvfb, NapCat, AstrBot, Gemini, nginx
 - `nginx/nginx.conf` — OpenResty dynamic routing and admin API
-- `scripts/` — NapCat launcher and backup/restore scripts
+- `scripts/` — NapCat launcher script
 
 ---
 
 ## Environment Variables (Tables)
 
-Core (strongly recommended on Hugging Face for persistence)
-
-| Name | Required | Default | Example | Notes/How to get |
-| --- | --- | --- | --- | --- |
-| `github_project` | Yes (HF) | — | `yourname/astrbot-data` | Target GitHub repo `owner/repo` to persist configs and data (private recommended). |
-| `github_secret` | Yes (HF) | — | `ghp_xxxxxxxxxxxxxxxxxxxxx` | GitHub Personal Access Token with `repo` scope (classic or fine‑grained). Create under GitHub → Settings → Developer settings. |
-| `GIT_BRANCH` | No | `main` | `main` | Branch used by the backup repo. |
-
-Alternative credentials (use these instead of the two above if you prefer)
-
-| Name | Required | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `GITHUB_USER` | No | — | `yourname` | GitHub username, used with `GITHUB_PAT` and `GITHUB_REPO`. |
-| `GITHUB_PAT` | No | — | `ghp_xxxxxxxxxxxxxxxxxxxxx` | GitHub token with `repo` scope. |
-| `GITHUB_REPO` | No | — | `yourname/astrbot-data` | Repo `owner/repo`. |
-
-Backup/sync (advanced, optional)
-
-| Name | Required | Default | Example | Notes |
-| --- | --- | --- | --- | --- |
-| `BACKUP_REPO_DIR` | No | `/home/user/.astrbot-backup` | same | Local history repo path (in container). |
-| `HIST_DIR` | No | `/home/user/.astrbot-backup` | same | History repo root; same as `BACKUP_REPO_DIR`. |
-| `BACKUP_INTERVAL_SECONDS` | No | `180` | `180` | Poll interval for backup/push. |
-| `LARGE_THRESHOLD` | No | `52428800` | `52428800` | Large-file threshold (bytes) for pointerization + release asset upload. |
-| `RELEASE_TAG` | No | `blobs` | `blobs` | Release tag used for large-file pointers. |
-| `STICKY_POINTER` | No | `true` | `true` | Remove original file after pointer generation. |
-| `VERIFY_SHA` | No | `true` | `true` | Verify SHA256 after downloads. |
-| `READINESS_FILE` | No | `${HIST_DIR}/.backup.ready` | `/home/user/.astrbot-backup/.backup.ready` | Signals backup/restore done; other processes wait on it. |
-| `INIT_SYNC_TIMEOUT` | No | `0` | `0` | Initial pull wait timeout (seconds). 0 waits indefinitely; backup init blocks until a successful GitHub fetch/reset completes before signaling readiness. |
-| `SYNC_LOG_DIR` | No | `/home/user/synclogs` | same | Sync log directory. |
-
 NapCat (optional)
 
 | Name | Required | Default | Example | Notes |
 | --- | --- | --- | --- | --- |
-| `NAPCAT_FLAGS` | No | empty | `--disable-gpu` | Extra flags passed to the QQ AppImage. Non‑root run usually doesn’t require `--no-sandbox`. |
+| `NAPCAT_FLAGS` | No | empty | `--disable-gpu` | Extra flags passed to the QQ AppImage. Non‑root run usually doesn't require `--no-sandbox`. |
 | `TZ` | No | `Asia/Shanghai` | `Asia/Shanghai` | Timezone. |
 
 Gemini Balance (set if you use the Gemini proxy; env or `.env` supported)
@@ -79,12 +48,9 @@ Gemini Balance (set if you use the Gemini proxy; env or `.env` supported)
 | `BASE_URL` | No | `https://generativelanguage.googleapis.com/v1beta` | same | Gemini API base URL. |
 | `PROXIES` | No | `[]` | `["http://host:port"]` | Optional HTTP/SOCKS5 proxies array. |
 
-Tip: You can also commit a `.env` file (see `_refs/gemini-balance-main/.env.example`) into your backup repo under `home/user/gemini-balance-main/.env`; the backup step restores it before the service starts.
-
 ---
 
 ## Getting Tokens/Keys
-- GitHub token (`github_secret`): create a PAT with `repo` scope in GitHub → Settings → Developer settings.
 - Google Gemini `API_KEYS`: create keys in Google AI Studio; put them as a JSON array string in `API_KEYS`.
 
 ---
@@ -98,9 +64,6 @@ docker build -t astrbot-napcat-hf:latest .
 ```
 docker run -d \
   -p 7860:7860 \
-  -e github_project=yourname/astrbot-data \
-  -e github_secret=ghp_xxx... \
-  -e GIT_BRANCH=main \
   -e API_KEYS='["AIzaSy..."]' \
   -e ALLOWED_TOKENS='["sk-123"]' \
   -e AUTH_TOKEN=sk-123 \
@@ -118,18 +81,15 @@ docker run -d \
 1) Create a Space (Docker SDK). Private is recommended for privacy.
 2) Push this repo to the Space or connect via GitHub.
 3) Configure Settings → Variables and secrets:
-- Required: `github_project`, `github_secret`; optional `GIT_BRANCH`.
 - For Gemini: `API_KEYS`, `ALLOWED_TOKENS`, `AUTH_TOKEN`, etc.
 - Optional: `NAPCAT_FLAGS` (e.g. `--disable-gpu`).
 4) Hardware: CPU Basic is enough; disable Sleep to keep bots online.
 5) Start the Space; wait for build, then open the Space URL (listens on 7860).
 6) First‑time:
 - Visit `/admin/ui/` and change the admin password.
-- Configure AstrBot providers/platforms (or pre‑seed under `home/user/AstrBot/data` in backup repo).
-- Login/bind NapCat via `/webui/`; settings persist via backup.
+- Configure AstrBot providers/platforms.
+- Login/bind NapCat via `/webui/`.
 - Provide `API_KEYS` or `.env` for Gemini; test endpoints.
-
-Persistence: the Space filesystem is ephemeral. The backup service clones your GitHub repo, symlinks key directories, and pushes changes back on a schedule.
 
 ---
 
