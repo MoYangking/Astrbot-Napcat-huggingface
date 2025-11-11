@@ -33,26 +33,32 @@ def ensure_symlink(src: str, dst: str) -> None:
     - 若 src 存在（文件/目录），先移除再创建软链；
     - 父目录若不存在则自动创建。
     """
-    os.makedirs(os.path.dirname(src), exist_ok=True)
+    parent = os.path.dirname(src)
+    if parent:
+        log(f"确保父目录存在: {parent}")
+        os.makedirs(parent, exist_ok=True)
+    
     if os.path.islink(src):
-        # update link target if needed
         cur = os.readlink(src)
-        if cur != dst:
-            try:
-                os.unlink(src)
-            except OSError:
-                pass
-            os.symlink(dst, src)
-        return
-    if os.path.exists(src):
-        try:
-            os.unlink(src)
-        except OSError:
-            if os.path.isdir(src):
-                shutil.rmtree(src)
-            else:
-                os.remove(src)
-    os.symlink(dst, src)
+        if cur == dst:
+            log(f"符号链接已存在且正确: {src} -> {dst}")
+            return
+        log(f"更新符号链接 {src}: {cur} -> {dst}")
+        os.unlink(src)
+    elif os.path.exists(src):
+        log(f"删除已存在的路径: {src} (isdir={os.path.isdir(src)})")
+        if os.path.isdir(src):
+            shutil.rmtree(src)
+        else:
+            os.remove(src)
+    
+    try:
+        os.symlink(dst, src)
+        log(f"✓ 符号链接已创建: {src} -> {dst}")
+    except OSError as e:
+        log(f"✗ 符号链接创建失败: {src} -> {dst}, 错误: {e}")
+        raise
+
 
 
 def migrate_and_link(base: str, hist_dir: str, rel_targets: Iterable[str]) -> None:
@@ -63,16 +69,21 @@ def migrate_and_link(base: str, hist_dir: str, rel_targets: Iterable[str]) -> No
     - rel_targets: BASE 相对路径（例如 `home/user/AstrBot/data`）。
     """
     for rel in rel_targets:
-        src = to_abs_under_base(base, rel)
-        dst = to_under_hist(hist_dir, rel)
+        log(f"处理目标: {rel}")
+        # Normalize: remove trailing slash for symlink paths
+        rel_clean = rel.rstrip("/")
+        src = to_abs_under_base(base, rel_clean)
+        dst = to_under_hist(hist_dir, rel_clean)
+        log(f"  src={src}, dst={dst}")
         os.makedirs(os.path.dirname(dst), exist_ok=True)
 
         if os.path.islink(src):
-            # Already a link, just ensure points to dst
+            log(f"  {src} 已是符号链接")
             ensure_symlink(src, dst)
             continue
 
         if os.path.isdir(src):
+            log(f"  {src} 是目录，开始迁移")
             os.makedirs(dst, exist_ok=True)
             if _rsync_available():
                 subprocess.run(["rsync", "-a", f"{src}/", f"{dst}/"], check=False)
@@ -88,9 +99,11 @@ def migrate_and_link(base: str, hist_dir: str, rel_targets: Iterable[str]) -> No
                         if not os.path.exists(t):
                             shutil.copy2(s, t)
             # remove original and link
+            log(f"  删除原目录: {src}")
             shutil.rmtree(src, ignore_errors=True)
             ensure_symlink(src, dst)
         elif os.path.isfile(src):
+            log(f"  {src} 是文件，开始迁移")
             if not os.path.exists(dst):
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 shutil.move(src, dst)
@@ -99,28 +112,29 @@ def migrate_and_link(base: str, hist_dir: str, rel_targets: Iterable[str]) -> No
                 os.remove(src)
             ensure_symlink(src, dst)
         else:
+            log(f"  {src} 不存在，创建空目标")
             # src missing; ensure dst exists (dir or empty file)
-            # If rel path looks like a file (has extension or exists as file under dst), create empty file
-            if rel.rstrip("/").split("/")[-1].count(".") >= 1:
+            # Use trailing slash to distinguish: path/ = directory, path = file
+            if rel.endswith("/"):
+                log(f"  是目录（以/结尾），创建空目录: {dst}")
+                os.makedirs(dst, exist_ok=True)
+            else:
+                log(f"  是文件（无/结尾），创建空文件: {dst}")
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 if not os.path.exists(dst):
                     open(dst, "a").close()
-            else:
-                os.makedirs(dst, exist_ok=True)
             ensure_symlink(src, dst)
 
 
 def precreate_dirlike(hist_dir: str, rel_targets: Iterable[str]) -> None:
-    """预创建“看起来是目录”的目标路径（无扩展名即视为目录）。"""
+    """预创建目录型目标（以/结尾的路径）。"""
     for rel in rel_targets:
-        # consider those without ext as dirs
-        name = rel.rstrip("/").split("/")[-1]
-        looks_file = "." in name
-        dst = to_under_hist(hist_dir, rel)
-        if looks_file:
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-        else:
+        rel_clean = rel.rstrip("/")
+        dst = to_under_hist(hist_dir, rel_clean)
+        if rel.endswith("/"):
             os.makedirs(dst, exist_ok=True)
+        else:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
 
 
 def track_empty_dirs(hist_dir: str, rel_targets: Iterable[str], excludes: Iterable[str]) -> int:
@@ -130,7 +144,8 @@ def track_empty_dirs(hist_dir: str, rel_targets: Iterable[str], excludes: Iterab
     """
     written = 0
     for rel in rel_targets:
-        root = to_under_hist(hist_dir, rel)
+        rel_clean = rel.rstrip("/")
+        root = to_under_hist(hist_dir, rel_clean)
         if os.path.isdir(root):
             for d, subdirs, files in os.walk(root):
                 rel_under_hist = os.path.relpath(d, hist_dir).lstrip("./")

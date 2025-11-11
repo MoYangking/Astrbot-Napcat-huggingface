@@ -130,6 +130,8 @@ class SyncDaemon:
         with self._lock:
             # 尝试变基拉取以避免分叉
             git_ops.run(["git", "pull", "--rebase", "origin", self.st.branch], cwd=self.st.hist_dir, check=False)
+            # 持续跟踪空目录，确保新建的空文件夹也能被同步
+            track_empty_dirs(self.st.hist_dir, self.st.targets, self.st.excludes)
             changed = git_ops.add_all_and_commit_if_needed(
                 self.st.hist_dir, "chore(sync): periodic commit"
             )

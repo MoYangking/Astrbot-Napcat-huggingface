@@ -18,17 +18,18 @@ DEFAULT_HIST_DIR = os.environ.get("HIST_DIR", "/home/user/.astrbot-backup")
 DEFAULT_BRANCH = os.environ.get("GIT_BRANCH", "main")
 
 # Targets are relative to BASE; mirrors under HIST_DIR preserving path components
+# Directories should end with / to distinguish from files
 DEFAULT_TARGETS = (
     os.environ.get(
         "SYNC_TARGETS",
         " ".join(
             [
-                "home/user/AstrBot/data",
-                "home/user/config",
-                "app/napcat/config",
+                "home/user/AstrBot/data/",
+                "home/user/config/",
+                "app/napcat/config/",
                 "home/user/nginx/admin_config.json",
-                "app/.config/QQ",
-                "home/user/gemini-data",
+                "app/.config/QQ/",
+                "home/user/gemini-data/",
                 "home/user/gemini-balance-main/.env",
             ]
         ),
@@ -117,7 +118,7 @@ def load_settings() -> Settings:
     # 覆盖：从文件读取 targets/excludes
     overrides = _load_file_overrides(hist_dir)
     if isinstance(overrides.get("targets"), list) and overrides["targets"]:
-        targets = [str(x).strip("/") for x in overrides["targets"] if str(x).strip()]
+        targets = [str(x).lstrip("/") for x in overrides["targets"] if str(x).strip()]
     if isinstance(overrides.get("excludes"), list):
         ex = [str(x).strip("/") for x in overrides["excludes"] if str(x).strip()]
         if ex:

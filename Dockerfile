@@ -84,9 +84,12 @@ ENV DATABASE_TYPE=sqlite \
     TZ=Asia/Shanghai
 
 
-# NapCat AppImage: extract and keep extracted tree
-ADD --chown=1000:1000 https://github.com/NapNeko/NapCatAppImageBuild/releases/download/v4.8.124/QQ-40990_NapCat-v4.8.124-amd64.AppImage /home/user/QQ.AppImage
-RUN chmod +x /home/user/QQ.AppImage && \
+# NapCat AppImage: download latest release, extract and keep extracted tree
+RUN LATEST_URL=$(curl -sL https://api.github.com/repos/NapNeko/NapCatAppImageBuild/releases/latest | \
+    jq -r '.assets[] | select(.name | endswith("-amd64.AppImage")) | .browser_download_url' | head -1) && \
+    curl -L -o /home/user/QQ.AppImage "$LATEST_URL" && \
+    chown 1000:1000 /home/user/QQ.AppImage && \
+    chmod +x /home/user/QQ.AppImage && \
     /home/user/QQ.AppImage --appimage-extract && \
     mv squashfs-root /home/user/napcat && \
     chown -R 1000:1000 /home/user/napcat
@@ -125,6 +128,9 @@ ENV DISPLAY=:1 \
 
 # Optional: admin token for updating routes at runtime (used by Lua)
 ENV ROUTE_ADMIN_TOKEN=""
+
+# Control whether to start Gemini service (default: true)
+ENV ENABLE_GEMINI=true
 
 # Ensure OpenResty binaries present in PATH
 ENV PATH=/usr/local/openresty/bin:$PATH

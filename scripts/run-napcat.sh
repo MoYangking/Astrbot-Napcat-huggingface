@@ -17,4 +17,3 @@ fi
 
 # Fallback to extracted AppRun
 exec /home/user/napcat/AppRun ${NAPCAT_FLAGS:-}
-
