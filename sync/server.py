@@ -40,11 +40,6 @@ def create_app(daemon=None):
 
     app = FastAPI(title="Sync Manager", version="0.2.0")
 
-    web_dir = os.path.join(os.path.dirname(__file__), "web")
-    if os.path.isdir(web_dir):
-        # 静态页与 API 统一前缀 /sync
-        app.mount("/sync", StaticFiles(directory=web_dir, html=True), name="web")
-
     @app.get("/sync/api/status")
     def api_status() -> Dict:
         """返回运行时状态（JSON）。
@@ -215,6 +210,12 @@ def create_app(daemon=None):
             return {"ok": True}
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    # 静态文件挂载必须在最后，避免拦截 API 路由
+    web_dir = os.path.join(os.path.dirname(__file__), "web")
+    if os.path.isdir(web_dir):
+        # 静态页挂载到 /sync（但 API 路由优先级更高）
+        app.mount("/sync", StaticFiles(directory=web_dir, html=True), name="web")
 
     return app
 
