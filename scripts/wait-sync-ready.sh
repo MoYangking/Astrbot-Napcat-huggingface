@@ -67,7 +67,7 @@ done
 log "Git 已对齐远端 HEAD"
 
 # 链接检查（容忍失败，仅用于尽量确保链接完成）
-for _ in {1..30}; do
+for _ in {1..3000}; do
   if targets_symlinked; then
     log "目标符号链接已就绪"
     exit 0
