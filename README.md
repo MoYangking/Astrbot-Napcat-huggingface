@@ -98,6 +98,17 @@ docker run -d \
 
 ---
 
+## 扩展：添加新进程（服务）
+
+- 本项目通过 Supervisor 管理多进程（NapCat、AstrBot、Gemini、网关等）。
+- 如需添加新的服务（Python/Node 等），请阅读：`docs/添加新进程.md`。
+- 文档包含：
+  - 在 Dockerfile 中复制代码、安装依赖与权限设置（非 root，UID 1000）；
+  - 在 `supervisor/supervisord.conf` 中注册进程、设置工作目录与日志；
+  - 可选：将数据目录纳入同步（Sync）与路由暴露到 7860 端口下。
+
+---
+
 ## 路由管理 API 速查
 - 获取路由：
 ```

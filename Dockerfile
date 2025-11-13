@@ -99,6 +99,7 @@ RUN mkdir -p /home/user/logs && chown -R 1000:1000 /home/user/logs
 COPY --chown=1000:1000 supervisor/supervisord.conf /home/user/supervisord.conf
 RUN mkdir -p /home/user/nginx && chown -R 1000:1000 /home/user/nginx
 COPY --chown=1000:1000 nginx/nginx.conf /home/user/nginx/nginx.conf
+COPY --chown=1000:1000 nginx/default_admin_config.json /home/user/nginx/default_admin_config.json
 COPY --chown=1000:1000 nginx/route-admin /home/user/nginx/route-admin
 RUN mkdir -p \
       /home/user/nginx/tmp/body \
@@ -110,8 +111,7 @@ RUN mkdir -p \
 
 # Sync service (daemon + web)
 COPY --chown=1000:1000 sync /home/user/sync
-COPY --chown=1000:1000 sync_to_github.py /home/user/sync_to_github.py
-RUN chmod +x /home/user/sync_to_github.py && chown -R 1000:1000 /home/user/sync
+RUN chown -R 1000:1000 /home/user/sync
 
 # NapCat runtime dirs and launcher
 RUN mkdir -p /app/.config/QQ /app/napcat/config && chown -R 1000:1000 /app
