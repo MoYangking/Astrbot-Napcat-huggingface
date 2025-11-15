@@ -189,35 +189,37 @@ class GitHubReleaseAPI:
         Returns:
             成功返回 True
         """
-        url = asset["browser_download_url"]
-        size = asset["size"]
+        # 优先使用 API 端点（asset["url"]），这样在私有仓库下可以通过 PAT 授权；
+        # 若缺失则回退到 browser_download_url。
+        url = asset.get("url") or asset["browser_download_url"]
+        size = asset.get("size", 0)
         
-        log(f"Downloading {asset['name']} ({size} bytes)...")
+        log(f"Downloading {asset.get('name', '<unknown>')} ({size} bytes)...")
         
         # 确保父目录存在
         parent = os.path.dirname(save_path)
         if parent:
             os.makedirs(parent, exist_ok=True)
         
-        # 下载（带上鉴权头，以支持私有仓库）
-        headers = {
-            "Authorization": f"token {self.token}",
-            # 直接请求二进制数据，而不是 JSON
-            "Accept": "application/octet-stream",
-            "User-Agent": "AstrBot-Sync-LFS/1.0",
-        }
+        # 构造请求头：带上 Token，并在访问 API 端点时使用 octet-stream
+        headers = self.headers.copy()
+        # 对下载接口，期望拿到二进制流
+        headers["Accept"] = "application/octet-stream"
+        
         with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
             with client.stream("GET", url, headers=headers) as resp:
                 resp.raise_for_status()
                 downloaded = 0
-                with open(save_path, 'wb') as f:
+                with open(save_path, "wb") as f:
                     for chunk in resp.iter_bytes(chunk_size=8192):
+                        if not chunk:
+                            continue
                         f.write(chunk)
                         downloaded += len(chunk)
                         if progress_callback:
                             progress_callback(downloaded, size)
         
-        log(f"✓ Downloaded: {asset['name']}")
+        log(f"✓ Downloaded: {asset.get('name', '<unknown>')}")
         return True
     
     def delete_asset(self, asset: Dict[str, Any]) -> bool:
