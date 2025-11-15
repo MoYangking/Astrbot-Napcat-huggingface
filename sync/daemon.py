@@ -32,7 +32,14 @@ from sync.utils.logging import err, log
 
 # LFS imports (延迟导入，避免循环依赖)
 try:
-    from sync.core.lfs_ops import restore_all_lfs_files, scan_large_files, convert_to_lfs
+    from sync.core.lfs_ops import (
+        restore_all_lfs_files,
+        scan_large_files,
+        convert_to_lfs,
+        scan_pointer_files,
+        restore_from_lfs
+    )
+    from sync.core.pointer import read_pointer
     from sync.core.release_api import GitHubReleaseAPI
     from sync.core.manifest import Manifest
     LFS_AVAILABLE = True
@@ -264,9 +271,10 @@ class SyncDaemon:
     
     # -------- 同步循环 --------
     def pull_commit_push(self) -> None:
-        """一次完整的同步周期：先拉取(rebase)，再检测大文件，再提交，再推送。
+        """一次完整的同步周期：先拉取(rebase)，立即恢复LFS，再检测大文件，再提交，再推送。
 
         - 使用 `git pull --rebase` 尽量维持线性历史；
+        - pull 后立即恢复 LFS 文件（防止被删除）；
         - 扫描并转换大文件为 LFS（如果启用）；
         - 检测有变更才提交；
         - push 失败并不会中断守护，仅记录日志等待下次重试。
@@ -275,7 +283,28 @@ class SyncDaemon:
             # 1. 尝试变基拉取以避免分叉
             git_ops.run(["git", "pull", "--rebase", "origin", self.st.branch], cwd=self.st.hist_dir, check=False)
             
-            # 2. 处理大文件（转换为 LFS）
+            # 2. 立即恢复 LFS 文件（防止 pull 删除大文件）
+            if self.st.lfs_enabled and self._lfs_api and self._lfs_manifest:
+                try:
+                    # 扫描指针文件
+                    pointers = scan_pointer_files(self.st.hist_dir)
+                    if pointers:
+                        log(f"Found {len(pointers)} pointer files after pull, checking...")
+                        for pointer_path in pointers:
+                            pointer = read_pointer(pointer_path)
+                            if not pointer:
+                                continue
+                            
+                            # 检查实际文件是否存在
+                            actual_path = pointer_path[:-8] if pointer_path.endswith('.pointer') else pointer_path
+                            if not os.path.exists(actual_path):
+                                # 文件不存在，可能被 pull 删除了，立即恢复
+                                log(f"Restoring file deleted by pull: {os.path.basename(actual_path)}")
+                                restore_from_lfs(pointer_path, self._lfs_api, self._lfs_manifest, verify_hash=False)
+                except Exception as e:
+                    err(f"Failed to restore LFS files after pull: {e}")
+            
+            # 3. 处理大文件（转换为 LFS）
             self.process_large_files()
             
             # 3. 持续跟踪空目录，确保新建的空文件夹也能被同步

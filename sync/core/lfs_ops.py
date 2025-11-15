@@ -125,7 +125,28 @@ def convert_to_lfs(
         pointer_path = file_path + ".pointer"
         write_pointer(pointer_path, pointer)
         
-        # 6. 更新 manifest
+        # 6. 从 Git 索引中移除大文件（如果已被追踪）
+        from sync.core import git_ops
+        rel_path = os.path.relpath(file_path, manifest.hist_dir)
+        try:
+            # 检查文件是否被 Git 追踪
+            result = git_ops.run(
+                ["git", "ls-files", rel_path],
+                cwd=manifest.hist_dir,
+                check=False
+            )
+            if result.stdout.strip():
+                # 文件已被追踪，从索引中移除（但保留工作区文件）
+                git_ops.run(
+                    ["git", "rm", "--cached", rel_path],
+                    cwd=manifest.hist_dir,
+                    check=False
+                )
+                log(f"Removed {rel_path} from Git index (file kept locally)")
+        except Exception as e:
+            err(f"Failed to remove from Git index: {e}")
+        
+        # 7. 更新 manifest
         # 文件路径相对于 hist_dir
         rel_path = os.path.relpath(file_path, manifest.hist_dir)
         manifest.add_version(rel_path, file_hash, asset_name, file_size)
