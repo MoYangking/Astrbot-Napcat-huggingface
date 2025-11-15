@@ -73,10 +73,14 @@ def is_pointer_file(path: str) -> bool:
     
     # 内容检查：尝试解析 JSON
     try:
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+            # 快速检查是否包含关键字
+            if 'lfs-pointer' not in content:
+                return False
+            data = json.loads(content)
             return data.get("type") == "lfs-pointer"
-    except (json.JSONDecodeError, OSError, KeyError):
+    except (json.JSONDecodeError, OSError, KeyError, UnicodeDecodeError):
         return False
 
 
@@ -88,14 +92,19 @@ def read_pointer(path: str) -> Optional[PointerFile]:
     - None，如果失败或不是指针文件
     """
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
             data = json.load(f)
+        
+        # 验证数据类型
+        if not isinstance(data, dict):
+            err(f"Pointer file is not a dict: {path}")
+            return None
         
         if data.get("type") != "lfs-pointer":
             return None
         
         return PointerFile.from_dict(data)
-    except (json.JSONDecodeError, OSError, KeyError) as e:
+    except (json.JSONDecodeError, OSError, KeyError, UnicodeDecodeError, TypeError) as e:
         err(f"Failed to read pointer file {path}: {e}")
         return None
 

@@ -287,20 +287,28 @@ class SyncDaemon:
             if self.st.lfs_enabled and self._lfs_api and self._lfs_manifest:
                 try:
                     # 扫描指针文件
+                    from sync.core.lfs_ops import scan_pointer_files
+                    from sync.core.pointer import read_pointer
+                    
                     pointers = scan_pointer_files(self.st.hist_dir)
                     if pointers:
                         log(f"Found {len(pointers)} pointer files after pull, checking...")
                         for pointer_path in pointers:
-                            pointer = read_pointer(pointer_path)
-                            if not pointer:
+                            try:
+                                pointer = read_pointer(pointer_path)
+                                if not pointer:
+                                    log(f"Skipping invalid pointer: {pointer_path}")
+                                    continue
+                                
+                                # 检查实际文件是否存在
+                                actual_path = pointer_path[:-8] if pointer_path.endswith('.pointer') else pointer_path
+                                if not os.path.exists(actual_path):
+                                    # 文件不存在，可能被 pull 删除了，立即恢复
+                                    log(f"Restoring file deleted by pull: {os.path.basename(actual_path)}")
+                                    restore_from_lfs(pointer_path, self._lfs_api, self._lfs_manifest, verify_hash=False)
+                            except Exception as e:
+                                err(f"Failed to restore {pointer_path}: {e}")
                                 continue
-                            
-                            # 检查实际文件是否存在
-                            actual_path = pointer_path[:-8] if pointer_path.endswith('.pointer') else pointer_path
-                            if not os.path.exists(actual_path):
-                                # 文件不存在，可能被 pull 删除了，立即恢复
-                                log(f"Restoring file deleted by pull: {os.path.basename(actual_path)}")
-                                restore_from_lfs(pointer_path, self._lfs_api, self._lfs_manifest, verify_hash=False)
                 except Exception as e:
                     err(f"Failed to restore LFS files after pull: {e}")
             
