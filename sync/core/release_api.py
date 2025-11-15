@@ -199,14 +199,15 @@ class GitHubReleaseAPI:
         if parent:
             os.makedirs(parent, exist_ok=True)
         
-        # 下载公开 URL，不使用认证头（GitHub 公开下载链接不需要认证）
-        # 使用独立的 Client，不带 Authorization 头
-        with httpx.Client(
-            timeout=self.timeout,
-            follow_redirects=True,
-            headers={"User-Agent": "AstrBot-Sync-LFS/1.0"}  # 只保留 User-Agent
-        ) as client:
-            with client.stream("GET", url) as resp:
+        # 下载（带上鉴权头，以支持私有仓库）
+        headers = {
+            "Authorization": f"token {self.token}",
+            # 直接请求二进制数据，而不是 JSON
+            "Accept": "application/octet-stream",
+            "User-Agent": "AstrBot-Sync-LFS/1.0",
+        }
+        with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+            with client.stream("GET", url, headers=headers) as resp:
                 resp.raise_for_status()
                 downloaded = 0
                 with open(save_path, 'wb') as f:
