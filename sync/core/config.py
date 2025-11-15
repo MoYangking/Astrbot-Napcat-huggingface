@@ -50,6 +50,13 @@ DEFAULT_EXCLUDES = (
     .split()
 )
 
+# 系统文件强制排除（无论用户如何配置都会排除）
+SYSTEM_EXCLUDES = [
+    ".sync-complete",
+    ".sync-progress.json",
+    ".sync.ready",
+]
+
 # LFS 配置
 DEFAULT_LFS_ENABLED = os.environ.get("LFS_ENABLED", "true").lower() == "true"
 DEFAULT_LFS_THRESHOLD = int(os.environ.get("LFS_THRESHOLD", str(60 * 1024 * 1024)))  # 默认 60MB
@@ -138,6 +145,11 @@ def load_settings() -> Settings:
         ex = [str(x).strip("/") for x in overrides["excludes"] if str(x).strip()]
         if ex:
             excludes = ex
+    
+    # 强制添加系统排除项（无论用户如何配置）
+    for sys_ex in SYSTEM_EXCLUDES:
+        if sys_ex not in excludes:
+            excludes.append(sys_ex)
 
     ready_file = os.environ.get("SYNC_READY_FILE", os.path.join(hist_dir, ".sync.ready"))
     
