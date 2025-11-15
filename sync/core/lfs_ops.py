@@ -131,9 +131,12 @@ def convert_to_lfs(
         manifest.add_version(rel_path, file_hash, asset_name, file_size)
         manifest.save()
         
-        # 7. 删除原文件
-        os.remove(file_path)
-        log(f"✓ Converted to LFS: {filename}")
+        # 7. 将原文件添加到 Git exclude（不删除！保留供程序访问）
+        from sync.core.blacklist import ensure_git_info_exclude
+        exclude_path = os.path.relpath(file_path, manifest.hist_dir)
+        ensure_git_info_exclude(manifest.hist_dir, [exclude_path])
+        
+        log(f"✓ Converted to LFS: {filename} (file kept, pointer created)")
         
         return True
     except Exception as e:
@@ -217,12 +220,27 @@ def restore_from_lfs(
                 err(f"Hash mismatch for {pointer.filename}: expected {pointer.hash}, got {downloaded_hash}")
                 return False
         
-        # 6. 替换指针文件为实际文件
+        # 6. 保存实际文件（不删除指针文件，两者共存）
         actual_path = pointer_path[:-8] if pointer_path.endswith('.pointer') else pointer_path
-        shutil.move(temp_path, actual_path)
-        os.remove(pointer_path)
         
-        log(f"✓ Restored from LFS: {pointer.filename}")
+        # 如果实际文件已存在，检查哈希是否匹配
+        if os.path.exists(actual_path):
+            existing_hash = calculate_file_hash(actual_path)
+            if existing_hash == pointer.hash:
+                log(f"File already exists with correct hash, skipping: {pointer.filename}")
+                os.remove(temp_path)
+                return True
+        
+        # 移动临时文件到实际位置
+        shutil.move(temp_path, actual_path)
+        
+        # 保留指针文件（不删除！）
+        # 将实际文件添加到 Git exclude
+        from sync.core.blacklist import ensure_git_info_exclude
+        exclude_path = os.path.relpath(actual_path, manifest.hist_dir)
+        ensure_git_info_exclude(manifest.hist_dir, [exclude_path])
+        
+        log(f"✓ Restored from LFS: {pointer.filename} (pointer kept)")
         return True
     except Exception as e:
         err(f"Failed to restore {pointer_path} from LFS: {e}")

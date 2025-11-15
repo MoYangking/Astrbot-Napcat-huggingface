@@ -208,23 +208,85 @@ class SyncDaemon:
             err(f"LFS restore failed: {e}")
             # 继续执行，不阻止启动
 
+    # -------- LFS 上传 --------
+    def process_large_files(self) -> None:
+        """扫描并处理大文件（转换为 LFS）"""
+        if not self.st.lfs_enabled or not self._lfs_api or not self._lfs_manifest:
+            return
+        
+        try:
+            # 扫描所有目标目录中的大文件
+            large_files = scan_large_files(
+                self.st.hist_dir,
+                self.st.lfs_threshold,
+                self.st.excludes
+            )
+            
+            if not large_files:
+                return
+            
+            log(f"Found {len(large_files)} large files (>{self.st.lfs_threshold} bytes)")
+            
+            # 逐个转换为 LFS
+            for file_path in large_files:
+                try:
+                    log(f"Converting to LFS: {os.path.relpath(file_path, self.st.hist_dir)}")
+                    convert_to_lfs(
+                        file_path,
+                        self._lfs_api,
+                        self._lfs_manifest,
+                        self.st.lfs_release_tag
+                    )
+                except Exception as e:
+                    err(f"Failed to convert {file_path} to LFS: {e}")
+            
+            # 清理旧版本（每个文件保留最多 N 个版本）
+            log("Cleaning up old LFS versions...")
+            to_delete = self._lfs_manifest.cleanup_all_old_versions(keep=self.st.lfs_max_versions)
+            
+            # 从 Release 删除旧版本的 assets
+            if to_delete:
+                release = self._lfs_api.get_or_create_release(self.st.lfs_release_tag)
+                for file_path, asset_names in to_delete.items():
+                    for asset_name in asset_names:
+                        try:
+                            asset = self._lfs_api.get_asset_by_name(release, asset_name)
+                            if asset:
+                                self._lfs_api.delete_asset(asset)
+                        except Exception as e:
+                            err(f"Failed to delete old asset {asset_name}: {e}")
+            
+            # 保存 manifest
+            self._lfs_manifest.save()
+            
+        except Exception as e:
+            err(f"Failed to process large files: {e}")
+    
     # -------- 同步循环 --------
     def pull_commit_push(self) -> None:
-        """一次完整的同步周期：先拉取(rebase)，再提交，再推送。
+        """一次完整的同步周期：先拉取(rebase)，再检测大文件，再提交，再推送。
 
         - 使用 `git pull --rebase` 尽量维持线性历史；
+        - 扫描并转换大文件为 LFS（如果启用）；
         - 检测有变更才提交；
         - push 失败并不会中断守护，仅记录日志等待下次重试。
         """
         with self._lock:
-            # 尝试变基拉取以避免分叉
+            # 1. 尝试变基拉取以避免分叉
             git_ops.run(["git", "pull", "--rebase", "origin", self.st.branch], cwd=self.st.hist_dir, check=False)
-            # 持续跟踪空目录，确保新建的空文件夹也能被同步
+            
+            # 2. 处理大文件（转换为 LFS）
+            self.process_large_files()
+            
+            # 3. 持续跟踪空目录，确保新建的空文件夹也能被同步
             track_empty_dirs(self.st.hist_dir, self.st.targets, self.st.excludes)
+            
+            # 4. 提交变更（包括新的指针文件和 manifest）
             changed = git_ops.add_all_and_commit_if_needed(
                 self.st.hist_dir, "chore(sync): periodic commit"
             )
-            # 若有变更或远端领先，尝试推送
+            
+            # 5. 若有变更或远端领先，尝试推送
             try:
                 git_ops.run(["git", "push", "origin", self.st.branch], cwd=self.st.hist_dir, check=False)
                 if changed:

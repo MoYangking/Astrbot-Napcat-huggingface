@@ -211,6 +211,118 @@ def create_app(daemon=None):
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+    # LFS 大文件管理 API
+    @app.get("/sync/api/lfs/status")
+    def api_lfs_status():
+        """返回 LFS 状态和配置信息"""
+        st = load_settings()
+        return {
+            "enabled": st.lfs_enabled,
+            "threshold": st.lfs_threshold,
+            "release_tag": st.lfs_release_tag,
+            "max_versions": st.lfs_max_versions,
+            "max_workers": st.lfs_max_workers
+        }
+    
+    @app.post("/sync/api/lfs/scan")
+    def api_lfs_scan():
+        """扫描大文件（不上传）"""
+        try:
+            if daemon is None:
+                return JSONResponse({"ok": False, "error": "Daemon not available"}, status_code=503)
+            
+            if not daemon._lfs_api or not daemon._lfs_manifest:
+                return JSONResponse({"ok": False, "error": "LFS not enabled"}, status_code=400)
+            
+            from sync.core.lfs_ops import scan_large_files
+            st = load_settings()
+            
+            large_files = scan_large_files(
+                st.hist_dir,
+                st.lfs_threshold,
+                st.excludes
+            )
+            
+            # 转换为相对路径
+            files = [os.path.relpath(f, st.hist_dir) for f in large_files]
+            
+            return {
+                "ok": True,
+                "files": files,
+                "count": len(files),
+                "threshold_mb": st.lfs_threshold / (1024 * 1024)
+            }
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    
+    @app.post("/sync/api/lfs/upload")
+    def api_lfs_upload():
+        """手动触发大文件上传"""
+        try:
+            if daemon is None:
+                return JSONResponse({"ok": False, "error": "Daemon not available"}, status_code=503)
+            
+            if not daemon._lfs_api or not daemon._lfs_manifest:
+                return JSONResponse({"ok": False, "error": "LFS not enabled"}, status_code=400)
+            
+            # 调用 daemon 的 process_large_files 方法
+            daemon.process_large_files()
+            
+            return {"ok": True, "message": "Large files uploaded successfully"}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    
+    @app.post("/sync/api/lfs/restore")
+    def api_lfs_restore():
+        """手动触发 LFS 文件恢复（从指针下载）"""
+        try:
+            if daemon is None:
+                return JSONResponse({"ok": False, "error": "Daemon not available"}, status_code=503)
+            
+            if not daemon._lfs_api or not daemon._lfs_manifest:
+                return JSONResponse({"ok": False, "error": "LFS not enabled"}, status_code=400)
+            
+            # 调用 daemon 的 restore_lfs_files 方法
+            daemon.restore_lfs_files()
+            
+            return {"ok": True, "message": "LFS files restored successfully"}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    
+    @app.get("/sync/api/lfs/list")
+    def api_lfs_list():
+        """列出所有被 LFS 管理的文件"""
+        try:
+            if daemon is None:
+                return JSONResponse({"ok": False, "error": "Daemon not available"}, status_code=503)
+            
+            if not daemon._lfs_manifest:
+                return JSONResponse({"ok": False, "error": "LFS not enabled"}, status_code=400)
+            
+            files = daemon._lfs_manifest.list_all_files()
+            
+            # 获取每个文件的详细信息
+            file_info = []
+            for file_path in files:
+                record = daemon._lfs_manifest.get_file_record(file_path)
+                if record:
+                    current_ver = daemon._lfs_manifest.get_current_version(file_path)
+                    file_info.append({
+                        "path": file_path,
+                        "current_hash": record.current_hash[:16] + "...",
+                        "size": current_ver.size if current_ver else 0,
+                        "version_count": len(record.versions),
+                        "asset_name": current_ver.asset_name if current_ver else ""
+                    })
+            
+            return {
+                "ok": True,
+                "files": file_info,
+                "count": len(file_info)
+            }
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
     # 静态文件挂载必须在最后，避免拦截 API 路由
     web_dir = os.path.join(os.path.dirname(__file__), "web")
     if os.path.isdir(web_dir):

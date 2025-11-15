@@ -51,6 +51,36 @@
       </div>
 
       <div class="card">
+        <h3>LFS 大文件管理</h3>
+        <div style="margin-bottom:12px">
+          <button id="btnLfsStatus">查看 LFS 状态</button>
+          <button id="btnLfsScan">扫描大文件</button>
+          <button id="btnLfsUpload">上传大文件</button>
+          <button id="btnLfsRestore">恢复 LFS 文件</button>
+          <button id="btnLfsList">列出已管理文件</button>
+        </div>
+        <div id="lfsInfo" style="background:#0f172a;padding:12px;border-radius:8px;margin-top:8px;display:none">
+          <h4 style="margin-top:0">LFS 信息</h4>
+          <pre id="lfsDetails" style="margin:0;font-size:13px;overflow-x:auto"></pre>
+        </div>
+        <div id="lfsFileList" style="margin-top:12px;display:none">
+          <h4>已管理的大文件</h4>
+          <table>
+            <thead>
+              <tr>
+                <th>文件路径</th>
+                <th>当前哈希</th>
+                <th>大小</th>
+                <th>版本数</th>
+                <th>Asset 名称</th>
+              </tr>
+            </thead>
+            <tbody id="lfsFileTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
         <h3>说明</h3>
         <ul>
           <li>环境变量 <code>GITHUB_PAT</code>, <code>GITHUB_REPO</code> 必须已配置。</li>
@@ -119,6 +149,93 @@
       document.getElementById('btnRefresh').onclick = ()=>loadStatus();
       document.getElementById('btnSaveTargets').onclick = (e)=>saveTargets(e.target);
       document.getElementById('btnSaveExcludes').onclick = (e)=>saveExcludes(e.target);
+      
+      // LFS 功能
+      async function lfsStatus(btn){
+        btn.disabled = true;
+        try{
+          const res = await fetch('/sync/api/lfs/status');
+          const j = await res.json();
+          document.getElementById('lfsInfo').style.display = '';
+          document.getElementById('lfsDetails').textContent =
+            `启用状态: ${j.enabled ? '✓ 已启用' : '✗ 未启用'}\n` +
+            `大小阈值: ${(j.threshold / 1024 / 1024).toFixed(0)} MB\n` +
+            `Release 标签: ${j.release_tag}\n` +
+            `最大版本数: ${j.max_versions}\n` +
+            `并发数: ${j.max_workers}`;
+        }catch(e){ alert('请求失败: '+e); }
+        finally{ btn.disabled = false; }
+      }
+      async function lfsScan(btn){
+        btn.disabled = true;
+        try{
+          const j = await post('/sync/api/lfs/scan');
+          if(j.ok){
+            document.getElementById('lfsInfo').style.display = '';
+            if(j.count === 0){
+              document.getElementById('lfsDetails').textContent = `未发现大于 ${j.threshold_mb.toFixed(0)} MB 的文件`;
+            }else{
+              document.getElementById('lfsDetails').textContent =
+                `发现 ${j.count} 个大文件 (>${j.threshold_mb.toFixed(0)} MB):\n\n` +
+                j.files.map((f,i)=>`${i+1}. ${f}`).join('\n');
+            }
+          }else{
+            alert('扫描失败: '+(j.error||'未知错误'));
+          }
+        }catch(e){ alert('请求失败: '+e); }
+        finally{ btn.disabled = false; }
+      }
+      async function lfsUpload(btn){
+        btn.disabled = true;
+        try{
+          const j = await post('/sync/api/lfs/upload');
+          alert(j.ok? '✓ 大文件已上传' : ('上传失败: '+(j.error||'未知错误')));
+          if(j.ok) await lfsScan(document.getElementById('btnLfsScan'));
+        }catch(e){ alert('请求失败: '+e); }
+        finally{ btn.disabled = false; }
+      }
+      async function lfsRestore(btn){
+        btn.disabled = true;
+        try{
+          const j = await post('/sync/api/lfs/restore');
+          alert(j.ok? '✓ LFS 文件已恢复' : ('恢复失败: '+(j.error||'未知错误')));
+        }catch(e){ alert('请求失败: '+e); }
+        finally{ btn.disabled = false; }
+      }
+      async function lfsList(btn){
+        btn.disabled = true;
+        try{
+          const res = await fetch('/sync/api/lfs/list');
+          const j = await res.json();
+          if(j.ok){
+            document.getElementById('lfsFileList').style.display = '';
+            const tbody = document.getElementById('lfsFileTableBody');
+            tbody.innerHTML = '';
+            if(j.count === 0){
+              tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#6b7280">暂无 LFS 管理的文件</td></tr>';
+            }else{
+              j.files.forEach(f=>{
+                const row = tbody.insertRow();
+                row.insertCell(0).textContent = f.path;
+                row.insertCell(1).innerHTML = `<code>${f.current_hash}</code>`;
+                row.insertCell(2).textContent = (f.size / 1024 / 1024).toFixed(2) + ' MB';
+                row.insertCell(3).textContent = f.version_count;
+                row.insertCell(4).innerHTML = `<code style="font-size:11px">${f.asset_name}</code>`;
+              });
+            }
+          }else{
+            alert('列表失败: '+(j.error||'未知错误'));
+          }
+        }catch(e){ alert('请求失败: '+e); }
+        finally{ btn.disabled = false; }
+      }
+      
+      document.getElementById('btnLfsStatus').onclick = (e)=>lfsStatus(e.target);
+      document.getElementById('btnLfsScan').onclick = (e)=>lfsScan(e.target);
+      document.getElementById('btnLfsUpload').onclick = (e)=>lfsUpload(e.target);
+      document.getElementById('btnLfsRestore').onclick = (e)=>lfsRestore(e.target);
+      document.getElementById('btnLfsList').onclick = (e)=>lfsList(e.target);
+      
       loadStatus();
     </script>
   </body>
