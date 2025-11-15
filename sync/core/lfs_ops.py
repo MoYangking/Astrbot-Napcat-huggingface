@@ -22,6 +22,29 @@ from sync.core.manifest import Manifest
 from sync.utils.logging import log, err
 
 
+def sanitize_filename(filename: str) -> str:
+    """清理文件名，移除或替换特殊字符
+    
+    GitHub Release asset 名称不允许某些字符，需要预先清理
+    
+    Args:
+        filename: 原始文件名
+    
+    Returns:
+        清理后的文件名
+    """
+    import re
+    # 替换空格为下划线
+    filename = filename.replace(' ', '_')
+    # 替换括号为下划线
+    filename = filename.replace('(', '_').replace(')', '_')
+    # 移除连续的下划线
+    filename = re.sub(r'_+', '_', filename)
+    # 只保留字母、数字、点、短横线、下划线
+    filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+    return filename
+
+
 def calculate_file_hash(file_path: str, algorithm: str = "sha256") -> str:
     """计算文件哈希值（分块读取，避免内存溢出）
     
@@ -92,13 +115,16 @@ def convert_to_lfs(
         file_size = os.path.getsize(file_path)
         filename = os.path.basename(file_path)
         
-        # 2. 生成 asset 名称
+        # 2. 生成 asset 名称（清理特殊字符）
         hash_prefix = file_hash.split(':')[1][:12]  # 取前12位
-        asset_name = f"{hash_prefix}-{filename}"
+        clean_filename = sanitize_filename(filename)
+        asset_name = f"{hash_prefix}-{clean_filename}"
         
         # 3. 检查是否已上传
         release = api.get_or_create_release(release_tag)
         existing_asset = api.get_asset_by_name(release, asset_name)
+        
+        actual_asset_name = asset_name  # 默认使用清理后的名称
         
         if not existing_asset:
             # 4. 上传到 Release
@@ -108,18 +134,22 @@ def convert_to_lfs(
                 if progress_callback:
                     progress_callback(file_path, uploaded, total)
             
-            api.upload_asset(release, file_path, asset_name, upload_progress)
+            uploaded_asset = api.upload_asset(release, file_path, asset_name, upload_progress)
+            # 使用 API 返回的实际名称（GitHub 可能进一步修改）
+            actual_asset_name = uploaded_asset.get("name", asset_name)
+            log(f"Uploaded as: {actual_asset_name}")
         else:
-            log(f"Asset {asset_name} already exists, skipping upload")
+            actual_asset_name = existing_asset.get("name", asset_name)
+            log(f"Asset already exists: {actual_asset_name}")
         
-        # 5. 创建指针文件
+        # 5. 创建指针文件（使用实际的 asset 名称）
         pointer = PointerFile(
             version=1,
             hash=file_hash,
             size=file_size,
             filename=filename,
             release_tag=release_tag,
-            asset_name=asset_name
+            asset_name=actual_asset_name  # 使用实际名称
         )
         
         pointer_path = file_path + ".pointer"
@@ -146,10 +176,10 @@ def convert_to_lfs(
         except Exception as e:
             err(f"Failed to remove from Git index: {e}")
         
-        # 7. 更新 manifest
+        # 7. 更新 manifest（使用实际名称）
         # 文件路径相对于 hist_dir
         rel_path = os.path.relpath(file_path, manifest.hist_dir)
-        manifest.add_version(rel_path, file_hash, asset_name, file_size)
+        manifest.add_version(rel_path, file_hash, actual_asset_name, file_size)
         manifest.save()
         
         # 7. 将原文件添加到 Git exclude（不删除！保留供程序访问）
