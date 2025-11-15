@@ -7,6 +7,7 @@
   <style>
     :root { --bg:#0b1020; --card:#121933; --fg:#e7ecff; --muted:#a7b0d6; --accent:#6aa3ff; --ok:#2ecc71; --err:#ff4757; }
     html,body { margin:0; padding:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, PingFang SC, Noto Sans SC, Helvetica, Arial, sans-serif; background:var(--bg); color:var(--fg); }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .container { max-width: 980px; margin: 24px auto; padding: 0 16px; }
     .card { background: var(--card); border-radius: 12px; padding: 16px; box-shadow: 0 6px 20px rgba(0,0,0,.25); margin-bottom: 16px; }
     h1 { font-size: 20px; margin: 0 0 12px; }
@@ -26,6 +27,25 @@
 </head>
 <body>
   <div class="container">
+    <!-- Sync Status Card (only shown during sync) -->
+    <div class="card" id="syncStatusCard" style="display:none; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+      <h1 style="text-align:center; margin-bottom:20px;">🔄 正在同步数据</h1>
+      <p style="text-align:center; margin-bottom:20px; opacity:0.9;">请稍候，我们正在恢复您的配置和文件...</p>
+      
+      <div style="width:100%; height:30px; background:rgba(255,255,255,0.2); border-radius:15px; overflow:hidden; margin-bottom:15px; position:relative;">
+        <div id="syncProgressBar" style="height:100%; background:linear-gradient(90deg, #4CAF50, #8BC34A); border-radius:15px; transition:width 0.5s ease; display:flex; align-items:center; justify-content:center; font-weight:bold; font-size:14px; width:0%;">
+          <span id="syncProgressText">0%</span>
+        </div>
+      </div>
+      
+      <div style="text-align:center; padding:12px; background:rgba(255,255,255,0.1); border-radius:8px;">
+        <div style="display:inline-block; width:16px; height:16px; border:3px solid rgba(255,255,255,0.3); border-radius:50%; border-top-color:#fff; animation:spin 1s linear infinite; margin-right:8px; vertical-align:middle;"></div>
+        <span id="syncStatusText">正在初始化...</span>
+      </div>
+      
+      <div style="text-align:center; margin-top:12px; font-size:13px; opacity:0.7;" id="syncStageInfo">准备中...</div>
+    </div>
+    
     <div class="card">
       <h1>Nginx 动态路由管理</h1>
       <div class="row">
@@ -401,10 +421,68 @@
       }
     };
 
+    // 同步状态检查
+    const syncStatusMessages = {
+      'starting': '正在启动同步进程...',
+      'git': '正在同步 Git 仓库...',
+      'linking': '正在创建符号链接...',
+      'lfs_download': '正在下载大文件...',
+      'complete': '同步完成！'
+    };
+
+    async function checkSyncStatus() {
+      try {
+        const res = await fetch('/api/sync-progress');
+        const data = await res.json();
+        
+        const progress = data.progress || 0;
+        const stage = data.stage || 'starting';
+        const current = data.current || 0;
+        const total = data.total || 0;
+        
+        // 更新进度条
+        document.getElementById('syncProgressBar').style.width = progress + '%';
+        document.getElementById('syncProgressText').innerText = progress + '%';
+        
+        // 更新状态文本
+        const statusText = syncStatusMessages[stage] || '正在处理...';
+        document.getElementById('syncStatusText').innerText = statusText;
+        
+        // 更新详细信息
+        let stageInfo = '';
+        if (stage === 'lfs_download' && total > 0) {
+          stageInfo = `正在下载: ${current}/${total} 个文件`;
+        } else if (stage === 'git') {
+          stageInfo = '拉取配置和指针文件...';
+        } else if (stage === 'linking') {
+          stageInfo = '准备数据目录...';
+        } else if (stage === 'complete') {
+          stageInfo = '准备就绪！';
+        }
+        document.getElementById('syncStageInfo').innerText = stageInfo;
+        
+        // 如果进度 < 100，显示同步卡片并继续轮询
+        if (progress < 100) {
+          document.getElementById('syncStatusCard').style.display = '';
+          setTimeout(checkSyncStatus, 2000);
+        } else {
+          // 同步完成，隐藏卡片
+          document.getElementById('syncStatusCard').style.display = 'none';
+        }
+      } catch (error) {
+        // 如果无法获取进度（可能是同步已完成或API不可用），隐藏卡片
+        document.getElementById('syncStatusCard').style.display = 'none';
+      }
+    }
+
     // 初始化
     (function init() {
       const t = getToken();
       if (t) els.token.value = t;
+      
+      // 先检查同步状态
+      checkSyncStatus();
+      
       fetchRoutes();
       fetchRoutesJson();
     })();

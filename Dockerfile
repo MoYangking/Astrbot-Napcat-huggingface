@@ -139,5 +139,6 @@ ENV PATH=/usr/local/openresty/bin:$PATH
 
 EXPOSE 7860
 
-
+# Run as UID 1000
+USER 1000
 CMD ["supervisord", "-c", "/home/user/supervisord.conf"]
