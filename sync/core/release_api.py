@@ -199,8 +199,13 @@ class GitHubReleaseAPI:
         if parent:
             os.makedirs(parent, exist_ok=True)
         
-        # 下载
-        with httpx.Client(timeout=self.timeout, follow_redirects=True) as client:
+        # 下载公开 URL，不使用认证头（GitHub 公开下载链接不需要认证）
+        # 使用独立的 Client，不带 Authorization 头
+        with httpx.Client(
+            timeout=self.timeout,
+            follow_redirects=True,
+            headers={"User-Agent": "AstrBot-Sync-LFS/1.0"}  # 只保留 User-Agent
+        ) as client:
             with client.stream("GET", url) as resp:
                 resp.raise_for_status()
                 downloaded = 0
