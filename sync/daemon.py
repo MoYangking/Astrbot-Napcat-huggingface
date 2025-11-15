@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -28,6 +29,16 @@ from sync.core.blacklist import ensure_git_info_exclude
 from sync.core.config import Settings, load_settings
 from sync.core.linker import migrate_and_link, precreate_dirlike, track_empty_dirs
 from sync.utils.logging import err, log
+
+# LFS imports (延迟导入，避免循环依赖)
+try:
+    from sync.core.lfs_ops import restore_all_lfs_files, scan_large_files, convert_to_lfs
+    from sync.core.release_api import GitHubReleaseAPI
+    from sync.core.manifest import Manifest
+    LFS_AVAILABLE = True
+except ImportError as e:
+    LFS_AVAILABLE = False
+    log(f"LFS not available: {e}")
 
 
 class SyncDaemon:
@@ -46,6 +57,19 @@ class SyncDaemon:
         self._stop = threading.Event()
         self._lock = threading.Lock()  # 保护 git 操作的互斥
         self._last_commit_ts: float = 0.0
+        
+        # LFS 支持
+        self._lfs_api: Optional[GitHubReleaseAPI] = None
+        self._lfs_manifest: Optional[Manifest] = None
+        if self.st.lfs_enabled and LFS_AVAILABLE:
+            try:
+                self._lfs_api = GitHubReleaseAPI(self.st.github_repo, self.st.github_pat)
+                self._lfs_manifest = Manifest(self.st.hist_dir, self.st.lfs_release_tag)
+                log("LFS enabled")
+            except Exception as e:
+                err(f"Failed to initialize LFS: {e}")
+                self._lfs_api = None
+                self._lfs_manifest = None
 
     # -------- 核心阶段：准备远端并对齐 HEAD --------
     def _remote_url(self) -> str:
@@ -118,6 +142,66 @@ class SyncDaemon:
                     git_ops.push(self.st.hist_dir, self.st.branch)
                 except Exception as e:
                     err(f"初次推送失败（忽略）：{e}")
+    
+    # -------- 进度管理 --------
+    def write_progress(self, progress: dict) -> None:
+        """写入同步进度到文件（供 Nginx 状态页读取）"""
+        try:
+            with open(self.st.sync_progress_file, 'w', encoding='utf-8') as f:
+                json.dump(progress, f, indent=2)
+        except Exception as e:
+            err(f"Failed to write progress: {e}")
+    
+    def mark_sync_complete(self) -> None:
+        """标记同步完成，允许其他服务启动"""
+        try:
+            with open(self.st.sync_complete_file, 'w') as f:
+                f.write(str(int(time.time())))
+            log("✓ Sync completed, other services can start")
+            self.write_progress({"stage": "complete", "progress": 100})
+        except Exception as e:
+            err(f"Failed to mark sync complete: {e}")
+    
+    # -------- LFS 恢复 --------
+    def restore_lfs_files(self) -> None:
+        """恢复所有 LFS 文件（从指针文件下载实际文件）"""
+        if not self.st.lfs_enabled or not self._lfs_api or not self._lfs_manifest:
+            log("LFS not enabled or not available, skipping LFS restore")
+            return
+        
+        log("Stage: Restoring LFS files...")
+        self.write_progress({"stage": "lfs_download", "progress": 50, "current": 0, "total": 0})
+        
+        def progress_callback(completed: int, total: int):
+            progress_pct = 50 + int((completed / total) * 45) if total > 0 else 50
+            self.write_progress({
+                "stage": "lfs_download",
+                "progress": progress_pct,
+                "current": completed,
+                "total": total
+            })
+        
+        try:
+            results = restore_all_lfs_files(
+                self.st.hist_dir,
+                self._lfs_api,
+                self._lfs_manifest,
+                max_workers=self.st.lfs_max_workers,
+                progress_callback=progress_callback
+            )
+            
+            success_count = sum(1 for v in results.values() if v)
+            total_count = len(results)
+            
+            if total_count > 0:
+                log(f"LFS restore completed: {success_count}/{total_count} files")
+            else:
+                log("No LFS files to restore")
+            
+            self.write_progress({"stage": "lfs_download", "progress": 95})
+        except Exception as e:
+            err(f"LFS restore failed: {e}")
+            # 继续执行，不阻止启动
 
     # -------- 同步循环 --------
     def pull_commit_push(self) -> None:
@@ -148,11 +232,45 @@ class SyncDaemon:
     def run(self) -> int:
         """主运行函数：按步骤拉起守护逻辑并进入循环。"""
         log("启动 sync 守护进程…")
-        # 1) 远端准备并对齐
+        
+        # 写入初始进度
+        self.write_progress({"stage": "starting", "progress": 0})
+        
+        # 1) 远端准备并对齐（Git 同步）
+        log("Stage 1/4: Git repository sync...")
+        self.write_progress({"stage": "git", "progress": 10})
         self.ensure_remote_ready()
+        
+        # 确保 HEAD 完全对齐后再继续
+        log("Verifying Git HEAD alignment...")
+        max_retries = 10
+        for i in range(max_retries):
+            if self._head_matches_origin():
+                log("✓ Git HEAD aligned with remote")
+                break
+            log(f"Waiting for HEAD alignment... ({i+1}/{max_retries})")
+            time.sleep(2)
+        else:
+            err("Failed to align Git HEAD, but continuing...")
+        
+        self.write_progress({"stage": "git", "progress": 25})
+        
         # 2) 链接与空目录跟踪
+        log("Stage 2/4: Creating symlinks and tracking empty dirs...")
+        self.write_progress({"stage": "linking", "progress": 30})
         self.link_and_track()
-        # 3) 仅按固定周期同步
+        self.write_progress({"stage": "linking", "progress": 50})
+        
+        # 3) 恢复 LFS 文件
+        log("Stage 3/4: Restoring LFS files...")
+        self.restore_lfs_files()
+        
+        # 4) 标记同步完成
+        log("Stage 4/4: Finalizing...")
+        self.mark_sync_complete()
+        
+        # 5) 进入周期同步循环
+        log("Entering periodic sync loop...")
         while not self._stop.is_set():
             self.pull_commit_push()
             for _ in range(self.interval):

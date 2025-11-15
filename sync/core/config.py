@@ -50,6 +50,13 @@ DEFAULT_EXCLUDES = (
     .split()
 )
 
+# LFS 配置
+DEFAULT_LFS_ENABLED = os.environ.get("LFS_ENABLED", "true").lower() == "true"
+DEFAULT_LFS_THRESHOLD = int(os.environ.get("LFS_THRESHOLD", str(60 * 1024 * 1024)))  # 默认 60MB
+DEFAULT_LFS_RELEASE_TAG = os.environ.get("LFS_RELEASE_TAG", "large-files-v1")
+DEFAULT_LFS_MAX_VERSIONS = int(os.environ.get("LFS_MAX_VERSIONS", "3"))  # 每个文件最多保留 3 个版本
+DEFAULT_LFS_MAX_WORKERS = int(os.environ.get("LFS_MAX_WORKERS", "3"))  # 并发下载/上传数
+
 
 @dataclass
 class Settings:
@@ -61,6 +68,14 @@ class Settings:
     targets: List[str]
     excludes: List[str]
     ready_file: str  # 为兼容保留（守护进程不依赖此项）
+    # LFS 配置
+    lfs_enabled: bool
+    lfs_threshold: int
+    lfs_release_tag: str
+    lfs_max_versions: int
+    lfs_max_workers: int
+    sync_complete_file: str  # 同步完成标记文件
+    sync_progress_file: str  # 同步进度文件
 
 
 def _load_file_overrides(hist_dir: str) -> Dict[str, Any]:
@@ -125,6 +140,16 @@ def load_settings() -> Settings:
             excludes = ex
 
     ready_file = os.environ.get("SYNC_READY_FILE", os.path.join(hist_dir, ".sync.ready"))
+    
+    # LFS 配置
+    lfs_enabled = DEFAULT_LFS_ENABLED
+    lfs_threshold = DEFAULT_LFS_THRESHOLD
+    lfs_release_tag = DEFAULT_LFS_RELEASE_TAG
+    lfs_max_versions = DEFAULT_LFS_MAX_VERSIONS
+    lfs_max_workers = DEFAULT_LFS_MAX_WORKERS
+    
+    sync_complete_file = os.path.join(hist_dir, ".sync-complete")
+    sync_progress_file = os.path.join(hist_dir, ".sync-progress.json")
 
     return Settings(
         base=base,
@@ -135,6 +160,13 @@ def load_settings() -> Settings:
         targets=targets,
         excludes=excludes,
         ready_file=ready_file,
+        lfs_enabled=lfs_enabled,
+        lfs_threshold=lfs_threshold,
+        lfs_release_tag=lfs_release_tag,
+        lfs_max_versions=lfs_max_versions,
+        lfs_max_workers=lfs_max_workers,
+        sync_complete_file=sync_complete_file,
+        sync_progress_file=sync_progress_file,
     )
 
 
