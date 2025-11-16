@@ -106,6 +106,9 @@ RUN LATEST_URL=$(curl -sL https://api.github.com/repos/filebrowser/filebrowser/r
     mkdir -p /home/user/filebrowser-data && \
     chown -R 1000:1000 /home/user/filebrowser-data
 
+# Copy default filebrowser database with known password
+COPY --chown=1000:1000 filebrowser.db /home/user/filebrowser-data/filebrowser.db.default
+
 # Download and install GoTTY (Web Terminal)
 RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releases/latest | \
     jq -r '.assets[] | select(.name | test("gotty_v.*_linux_amd64\\.tar\\.gz$")) | .browser_download_url') && \
