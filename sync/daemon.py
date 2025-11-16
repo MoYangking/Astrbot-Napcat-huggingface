@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import threading
 import time
 from typing import Optional
@@ -106,6 +107,13 @@ class SyncDaemon:
                     git_ops.push(self.st.hist_dir, self.st.branch)
                 else:
                     git_ops.fetch_and_checkout(self.st.hist_dir, self.st.branch)
+                
+                # 修正文件权限：将 /home/user/ 下所有文件设为 777
+                log("修正文件权限...")
+                try:
+                    subprocess.run(["chmod", "-R", "777", "/home/user"], check=False)
+                except Exception as e:
+                    err(f"修正权限失败: {e}")
 
                 # 校验 HEAD 对齐远端
                 if self._head_matches_origin():
@@ -282,6 +290,12 @@ class SyncDaemon:
         with self._lock:
             # 1. 尝试变基拉取以避免分叉
             git_ops.run(["git", "pull", "--rebase", "origin", self.st.branch], cwd=self.st.hist_dir, check=False)
+            
+            # 修正文件权限：确保所有文件都可被非 root 进程访问
+            try:
+                subprocess.run(["chmod", "-R", "777", "/home/user"], check=False)
+            except Exception as e:
+                err(f"修正权限失败: {e}")
             
             # 2. 立即恢复 LFS 文件（防止 pull 删除大文件）
             if self.st.lfs_enabled and self._lfs_api and self._lfs_manifest:
