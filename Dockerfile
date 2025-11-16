@@ -139,6 +139,5 @@ ENV PATH=/usr/local/openresty/bin:$PATH
 
 EXPOSE 7860
 
-# Run as UID 1000
-USER 1000
+# Run supervisord as root (napcat will run as user 1000 via supervisord.conf)
 CMD ["supervisord", "-c", "/home/user/supervisord.conf"]

@@ -189,9 +189,8 @@ class GitHubReleaseAPI:
         Returns:
             成功返回 True
         """
-        # 优先使用 API 端点（asset["url"]），这样在私有仓库下可以通过 PAT 授权；
-        # 若缺失则回退到 browser_download_url。
-        url = asset.get("url") or asset["browser_download_url"]
+        # 使用 Release Asset 的 API 端点（asset["url"]），通过 PAT 鉴权下载二进制内容
+        url = asset["url"]
         size = asset.get("size", 0)
         
         log(f"Downloading {asset.get('name', '<unknown>')} ({size} bytes)...")
