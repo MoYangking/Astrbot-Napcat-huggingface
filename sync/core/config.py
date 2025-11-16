@@ -31,6 +31,7 @@ DEFAULT_TARGETS = (
                 "app/.config/QQ/",
                 "home/user/gemini-data/",
                 "home/user/gemini-balance-main/.env",
+                "home/user/filebrowser-data/filebrowser.db",
             ]
         ),
     )

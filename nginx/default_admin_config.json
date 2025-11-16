@@ -87,6 +87,26 @@
       "action": "proxy",
       "id": "proxy-sync",
       "priority": 180
+    },
+    {
+      "match": { "path_prefix": "/filebrowser/" },
+      "set_headers": [
+        { "value": "/filebrowser", "name": "X-Forwarded-Prefix" }
+      ],
+      "backend": "http://127.0.0.1:8888",
+      "action": "proxy",
+      "id": "proxy-filebrowser",
+      "priority": 180
+    },
+    {
+      "match": { "path_prefix": "/terminal/" },
+      "set_headers": [
+        { "value": "/terminal", "name": "X-Forwarded-Prefix" }
+      ],
+      "backend": "http://127.0.0.1:8080",
+      "action": "proxy",
+      "id": "proxy-gotty",
+      "priority": 180
     }
   ]
 }
