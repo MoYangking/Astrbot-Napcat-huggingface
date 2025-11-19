@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libffi-dev libssl-dev \
     ffmpeg \
     supervisor nginx-full \
+    proxychains4 \
     xvfb libfuse2t64 \
     libglib2.0-0 libnspr4 libnss3 libatk1.0-0 libatspi2.0-0 \
     libgtk-3-0 libgdk-pixbuf-2.0-0 libpango-1.0-0 libcairo2 \
