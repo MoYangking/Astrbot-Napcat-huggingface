@@ -1,242 +1,692 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sync 管理</title>
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sync 管理器</title>
+    <!-- Element Plus CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+    <!-- Dark Mode CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/theme-chalk/dark/css-vars.css">
     <style>
-      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;padding:20px;background:#0b1220;color:#e4e7ec}
-      .wrap{max-width:960px;margin:0 auto}
-      .card{background:#111827;border:1px solid #1f2937;border-radius:12px;padding:16px;margin-bottom:16px}
-      button{background:#2563eb;color:#fff;border:none;border-radius:8px;padding:8px 12px;cursor:pointer}
-      button:disabled{background:#334155;cursor:not-allowed}
-      code{background:#0f172a;padding:2px 6px;border-radius:6px}
-      table{width:100%;border-collapse:collapse}
-      td,th{border-bottom:1px solid #1f2937;padding:8px;text-align:left}
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <h2>Sync 管理</h2>
-
-      <div class="card">
-        <button id="btnInit">执行初始化</button>
-        <button id="btnSync">立即同步</button>
-        <button id="btnPull">仅拉取</button>
-        <button id="btnPush">仅推送</button>
-        <button id="btnRelink">重新链接</button>
-        <button id="btnTrack">跟踪空目录</button>
-        <button id="btnRefresh">刷新状态</button>
-      </div>
-
-      <div class="card">
-        <h3>状态</h3>
-        <pre id="status">加载中...</pre>
-      </div>
-
-      <div class="card">
-        <h3>目标与黑名单</h3>
-        <div style="display:flex; gap:16px; flex-wrap:wrap;">
-          <div style="flex:1; min-width:300px;">
-            <h4>同步目标 (每行一个，相对 BASE)</h4>
-            <textarea id="txtTargets" style="width:100%;height:120px"></textarea>
-            <div style="margin-top:8px"><button id="btnSaveTargets">保存目标</button></div>
-          </div>
-          <div style="flex:1; min-width:300px;">
-            <h4>黑名单 (每行一个，相对 HIST_DIR)</h4>
-            <textarea id="txtExcludes" style="width:100%;height:120px"></textarea>
-            <div style="margin-top:8px"><button id="btnSaveExcludes">保存黑名单</button></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>LFS 大文件管理</h3>
-        <div style="margin-bottom:12px">
-          <button id="btnLfsStatus">查看 LFS 状态</button>
-          <button id="btnLfsScan">扫描大文件</button>
-          <button id="btnLfsUpload">上传大文件</button>
-          <button id="btnLfsRestore">恢复 LFS 文件</button>
-          <button id="btnLfsList">列出已管理文件</button>
-        </div>
-        <div id="lfsInfo" style="background:#0f172a;padding:12px;border-radius:8px;margin-top:8px;display:none">
-          <h4 style="margin-top:0">LFS 信息</h4>
-          <pre id="lfsDetails" style="margin:0;font-size:13px;overflow-x:auto"></pre>
-        </div>
-        <div id="lfsFileList" style="margin-top:12px;display:none">
-          <h4>已管理的大文件</h4>
-          <table>
-            <thead>
-              <tr>
-                <th>文件路径</th>
-                <th>当前哈希</th>
-                <th>大小</th>
-                <th>版本数</th>
-                <th>Asset 名称</th>
-              </tr>
-            </thead>
-            <tbody id="lfsFileTableBody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <h3>说明</h3>
-        <ul>
-          <li>环境变量 <code>GITHUB_PAT</code>, <code>GITHUB_REPO</code> 必须已配置。</li>
-          <li>启动后后台每 3 分钟自动提交/推送；也可点击“立即同步”。</li>
-          <li>黑名单相对 <code>HIST_DIR</code>，可在此页面修改并即时生效。</li>
-        </ul>
-      </div>
-    </div>
-    <script>
-      async function loadStatus(){
-        const res = await fetch('/sync/api/status');
-        const j = await res.json();
-        document.getElementById('status').textContent = JSON.stringify(j,null,2);
-        // populate editors
-        if (Array.isArray(j.targets)) document.getElementById('txtTargets').value = j.targets.join('\n');
-        if (Array.isArray(j.excludes)) document.getElementById('txtExcludes').value = j.excludes.join('\n');
-      }
-      async function post(path, body){
-        const res = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined});
-        return res.json();
-      }
-      async function doInit(btn){
-        btn.disabled = true;
-        try{
-          const j = await post('/sync/api/init');
-          alert(j.ok? '初始化完成' : ('失败: '+(j.error||'未知错误')));
-          await loadStatus();
-        }catch(e){
-          alert('请求失败: '+e);
-        }finally{
-          btn.disabled = false;
+        body {
+            margin: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #1a1a1a;
+            color: #e5eaf3;
         }
-      }
-      async function doSimple(btn, path, okMsg){
-        btn.disabled = true;
-        try{ const j = await post(path); alert(j.ok? okMsg : ('失败: '+(j.error||'未知错误'))); await loadStatus(); }
-        catch(e){ alert('请求失败: '+e); }
-        finally{ btn.disabled = false; }
-      }
-      async function saveTargets(btn){
-        btn.disabled = true;
-        try{
-          const lines = document.getElementById('txtTargets').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-          const j = await post('/sync/api/targets', {targets: lines});
-          alert(j.ok? '已保存' : ('失败: '+(j.error||'未知错误')));
-          await loadStatus();
-        }catch(e){ alert('请求失败: '+e); }
-        finally{ btn.disabled = false; }
-      }
-      async function saveExcludes(btn){
-        btn.disabled = true;
-        try{
-          const lines = document.getElementById('txtExcludes').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
-          const j = await post('/sync/api/excludes', {excludes: lines});
-          alert(j.ok? '已保存' : ('失败: '+(j.error||'未知错误')));
-          await loadStatus();
-        }catch(e){ alert('请求失败: '+e); }
-        finally{ btn.disabled = false; }
-      }
-      document.getElementById('btnInit').onclick = (e)=>doInit(e.target);
-      document.getElementById('btnSync').onclick = (e)=>doSimple(e.target,'/sync/api/sync-now','已执行同步');
-      document.getElementById('btnPull').onclick = (e)=>doSimple(e.target,'/sync/api/pull','已拉取');
-      document.getElementById('btnPush').onclick = (e)=>doSimple(e.target,'/sync/api/push','已推送');
-      document.getElementById('btnRelink').onclick = (e)=>doSimple(e.target,'/sync/api/relink','已重新链接');
-      document.getElementById('btnTrack').onclick = (e)=>doSimple(e.target,'/sync/api/track-empty','已执行空目录跟踪');
-      document.getElementById('btnRefresh').onclick = ()=>loadStatus();
-      document.getElementById('btnSaveTargets').onclick = (e)=>saveTargets(e.target);
-      document.getElementById('btnSaveExcludes').onclick = (e)=>saveExcludes(e.target);
-      
-      // LFS 功能
-      async function lfsStatus(btn){
-        btn.disabled = true;
-        try{
-          const res = await fetch('/sync/api/lfs/status');
-          const j = await res.json();
-          document.getElementById('lfsInfo').style.display = '';
-          document.getElementById('lfsDetails').textContent =
-            `启用状态: ${j.enabled ? '✓ 已启用' : '✗ 未启用'}\n` +
-            `大小阈值: ${(j.threshold / 1024 / 1024).toFixed(0)} MB\n` +
-            `Release 标签: ${j.release_tag}\n` +
-            `最大版本数: ${j.max_versions}\n` +
-            `并发数: ${j.max_workers}`;
-        }catch(e){ alert('请求失败: '+e); }
-        finally{ btn.disabled = false; }
-      }
-      async function lfsScan(btn){
-        btn.disabled = true;
-        try{
-          const j = await post('/sync/api/lfs/scan');
-          if(j.ok){
-            document.getElementById('lfsInfo').style.display = '';
-            if(j.count === 0){
-              document.getElementById('lfsDetails').textContent = `未发现大于 ${j.threshold_mb.toFixed(0)} MB 的文件`;
-            }else{
-              document.getElementById('lfsDetails').textContent =
-                `发现 ${j.count} 个大文件 (>${j.threshold_mb.toFixed(0)} MB):\n\n` +
-                j.files.map((f,i)=>`${i+1}. ${f}`).join('\n');
+        #app {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .el-container {
+            height: 100%;
+        }
+        .el-header {
+            background-color: #1e1e20;
+            border-bottom: 1px solid #363637;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+        }
+        .logo {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #409eff;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .el-aside {
+            background-color: #1e1e20;
+            border-right: 1px solid #363637;
+        }
+        .el-main {
+            background-color: #141414;
+            padding: 20px;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-item {
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .status-label {
+            color: #909399;
+        }
+        .status-value {
+            font-family: monospace;
+            font-weight: bold;
+        }
+        .console-output {
+            background-color: #000;
+            color: #0f0;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            height: 200px;
+            overflow-y: auto;
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        .mb-4 { margin-bottom: 1rem; }
+        .mr-2 { margin-right: 0.5rem; }
+        .w-full { width: 100%; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #363637; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4c4c4d; 
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <el-container>
+            <el-header>
+                <div class="logo">
+                    <el-icon><Data-Analysis /></el-icon>
+                    Sync 管理器
+                </div>
+                <div>
+                    <el-tag v-if="status.ready" type="success" effect="dark">就绪</el-tag>
+                    <el-tag v-else type="warning" effect="dark">未就绪</el-tag>
+                </div>
+            </el-header>
+            <el-container>
+                <el-aside width="220px">
+                    <el-menu
+                        default-active="1"
+                        background-color="#1e1e20"
+                        text-color="#fff"
+                        active-text-color="#409eff"
+                        style="border-right: none;"
+                        @select="handleMenuSelect">
+                        <el-menu-item index="1">
+                            <el-icon><Odometer /></el-icon>
+                            <span>概览 & 操作</span>
+                        </el-menu-item>
+                        <el-menu-item index="2">
+                            <el-icon><Setting /></el-icon>
+                            <span>配置管理</span>
+                        </el-menu-item>
+                        <el-menu-item index="3">
+                            <el-icon><Files /></el-icon>
+                            <span>LFS 管理</span>
+                        </el-menu-item>
+                        <el-menu-item index="4">
+                            <el-icon><List /></el-icon>
+                            <span>Git 日志 & 文件</span>
+                        </el-menu-item>
+                    </el-menu>
+                </el-aside>
+                <el-main>
+                    <!-- View 1: Dashboard -->
+                    <div v-if="currentView === '1'">
+                        <el-row :gutter="20">
+                            <el-col :span="16">
+                                <el-card class="mb-4">
+                                    <template #header>
+                                        <div class="card-header">
+                                            <span>常用操作</span>
+                                            <el-button type="primary" link @click="loadStatus"><el-icon><Refresh /></el-icon> 刷新状态</el-button>
+                                        </div>
+                                    </template>
+                                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                        <el-button type="primary" @click="doAction('/sync/api/sync-now', '立即同步')" :loading="loading">立即同步</el-button>
+                                        <el-button type="success" @click="doAction('/sync/api/push', '仅推送')" :loading="loading">仅推送</el-button>
+                                        <el-button type="warning" @click="doAction('/sync/api/pull', '仅拉取')" :loading="loading">仅拉取</el-button>
+                                        <el-button type="info" @click="doAction('/sync/api/relink', '重新链接')" :loading="loading">重新链接</el-button>
+                                        <el-button @click="doAction('/sync/api/track-empty', '跟踪空目录')" :loading="loading">跟踪空目录</el-button>
+                                        <el-popconfirm title="确定要执行初始化吗？这可能需要一些时间。" @confirm="doInit">
+                                            <template #reference>
+                                                <el-button type="danger" :loading="loading">执行初始化</el-button>
+                                            </template>
+                                        </el-popconfirm>
+                                        <el-popconfirm title="确定要强制重置吗？这将丢失所有未提交的更改！" @confirm="doReset">
+                                            <template #reference>
+                                                <el-button type="danger" plain :loading="loading">强制重置</el-button>
+                                            </template>
+                                        </el-popconfirm>
+                                    </div>
+                                </el-card>
+
+                                <el-card class="mb-4">
+                                    <template #header>
+                                        <div class="card-header">
+                                            <span>系统日志 / 输出</span>
+                                            <el-button type="info" link size="small" @click="logs = []">清空</el-button>
+                                        </div>
+                                    </template>
+                                    <div class="console-output" ref="consoleRef">
+                                        <div v-for="(log, index) in logs" :key="index">
+                                            <span style="color: #888;">[{{ log.time }}]</span> {{ log.msg }}
+                                        </div>
+                                        <div v-if="logs.length === 0" style="color: #666;">暂无日志...</div>
+                                    </div>
+                                </el-card>
+                            </el-col>
+                            <el-col :span="8">
+                                <el-card class="mb-4">
+                                    <template #header>
+                                        <div class="card-header">
+                                            <span>状态信息</span>
+                                        </div>
+                                    </template>
+                                    <div class="status-item">
+                                        <span class="status-label">Git 初始化</span>
+                                        <el-tag :type="status.git_initialized ? 'success' : 'danger'" size="small">{{ status.git_initialized ? '是' : '否' }}</el-tag>
+                                    </div>
+                                    <div class="status-item">
+                                        <span class="status-label">未提交变更 (Dirty)</span>
+                                        <el-tag :type="status.dirty ? 'warning' : 'success'" size="small">{{ status.dirty ? '是' : '否' }}</el-tag>
+                                    </div>
+                                    <div class="status-item">
+                                        <span class="status-label">分支</span>
+                                        <span class="status-value">{{ status.branch }}</span>
+                                    </div>
+                                    <el-divider content-position="left">HEAD 信息</el-divider>
+                                    <div class="status-item">
+                                        <span class="status-label">本地 (Local)</span>
+                                        <el-tooltip :content="status.head" placement="top">
+                                            <span class="status-value">{{ shortHash(status.head) }}</span>
+                                        </el-tooltip>
+                                    </div>
+                                    <div class="status-item">
+                                        <span class="status-label">远端 (Remote)</span>
+                                        <el-tooltip :content="status.remote_head" placement="top">
+                                            <span class="status-value">{{ shortHash(status.remote_head) }}</span>
+                                        </el-tooltip>
+                                    </div>
+                                    <div class="status-item">
+                                        <span class="status-label">状态</span>
+                                        <el-tag v-if="status.head === status.remote_head && status.head" type="success" size="small">已同步</el-tag>
+                                        <el-tag v-else-if="!status.head || !status.remote_head" type="info" size="small">未知</el-tag>
+                                        <el-tag v-else type="warning" size="small">不一致</el-tag>
+                                    </div>
+                                </el-card>
+                                <el-card>
+                                    <template #header>
+                                        <div class="card-header">
+                                            <span>路径配置</span>
+                                        </div>
+                                    </template>
+                                    <div class="status-item">
+                                        <span class="status-label">基础目录 (Base Dir)</span>
+                                    </div>
+                                    <div style="font-size: 12px; color: #999; word-break: break-all; margin-bottom: 10px;">{{ status.base }}</div>
+                                    <div class="status-item">
+                                        <span class="status-label">历史目录 (Hist Dir)</span>
+                                    </div>
+                                    <div style="font-size: 12px; color: #999; word-break: break-all;">{{ status.hist_dir }}</div>
+                                </el-card>
+                            </el-col>
+                        </el-row>
+                    </div>
+
+                    <!-- View 2: Configuration -->
+                    <div v-if="currentView === '2'">
+                        <el-row :gutter="20">
+                            <el-col :span="12">
+                                <el-card>
+                                    <template #header>
+                                        <div class="card-header">
+                                            <span>同步目标 (Targets)</span>
+                                            <el-button type="primary" size="small" @click="saveTargets" :loading="loading">保存</el-button>
+                                        </div>
+                                    </template>
+                                    <el-alert title="每行一个，相对 BASE 目录" type="info" :closable="false" class="mb-4" show-icon></el-alert>
+                                    <el-input
+                                        v-model="targetsText"
+                                        :rows="15"
+                                        type="textarea"
+                                        placeholder="输入同步目标路径..."
+                                    />
+                                </el-card>
+                            </el-col>
+                            <el-col :span="12">
+                                <el-card>
+                                    <template #header>
+                                        <div class="card-header">
+                                            <span>黑名单 (Excludes)</span>
+                                            <el-button type="primary" size="small" @click="saveExcludes" :loading="loading">保存</el-button>
+                                        </div>
+                                    </template>
+                                    <el-alert title="每行一个，相对 HIST_DIR 目录" type="info" :closable="false" class="mb-4" show-icon></el-alert>
+                                    <el-input
+                                        v-model="excludesText"
+                                        :rows="15"
+                                        type="textarea"
+                                        placeholder="输入黑名单路径..."
+                                    />
+                                </el-card>
+                            </el-col>
+                        </el-row>
+                    </div>
+
+                    <!-- View 3: LFS Management -->
+                    <div v-if="currentView === '3'">
+                        <el-card class="mb-4">
+                            <template #header>
+                                <div class="card-header">
+                                    <span>LFS 操作</span>
+                                    <el-tag v-if="lfsStatus.enabled" type="success">LFS 已启用</el-tag>
+                                    <el-tag v-else type="info">LFS 未启用</el-tag>
+                                </div>
+                            </template>
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
+                                <el-button type="primary" @click="lfsScan" :loading="loading">扫描大文件</el-button>
+                                <el-button type="success" @click="lfsUpload" :loading="loading">上传大文件</el-button>
+                                <el-button type="warning" @click="lfsRestore" :loading="loading">恢复 LFS 文件</el-button>
+                                <el-button type="info" @click="lfsList" :loading="loading">刷新列表</el-button>
+                            </div>
+                            
+                            <el-descriptions title="LFS 配置信息" :column="4" border>
+                                <el-descriptions-item label="大小阈值">{{ (lfsStatus.threshold / 1024 / 1024).toFixed(0) }} MB</el-descriptions-item>
+                                <el-descriptions-item label="Release 标签">{{ lfsStatus.release_tag }}</el-descriptions-item>
+                                <el-descriptions-item label="最大版本数">{{ lfsStatus.max_versions }}</el-descriptions-item>
+                                <el-descriptions-item label="并发数">{{ lfsStatus.max_workers }}</el-descriptions-item>
+                            </el-descriptions>
+                        </el-card>
+
+                        <el-card v-if="lfsFiles.length > 0 || lfsScanResult">
+                            <template #header>
+                                <div class="card-header">
+                                    <span>文件列表</span>
+                                </div>
+                            </template>
+                            
+                            <!-- Scan Result -->
+                            <div v-if="lfsScanResult" class="mb-4">
+                                <el-alert
+                                    v-if="lfsScanResult.count === 0"
+                                    :title="`未发现大于 ${lfsScanResult.threshold_mb} MB 的文件`"
+                                    type="success"
+                                    show-icon
+                                    :closable="false">
+                                </el-alert>
+                                <el-alert
+                                    v-else
+                                    :title="`发现 ${lfsScanResult.count} 个大文件 (>${lfsScanResult.threshold_mb} MB)`"
+                                    type="warning"
+                                    show-icon
+                                    :closable="false">
+                                    <ul style="margin: 5px 0 0 20px;">
+                                        <li v-for="f in lfsScanResult.files" :key="f">{{ f }}</li>
+                                    </ul>
+                                </el-alert>
+                            </div>
+
+                            <!-- Managed Files List -->
+                            <el-table :data="lfsFiles" style="width: 100%" stripe border v-if="lfsFiles.length > 0">
+                                <el-table-column prop="path" label="文件路径" sortable></el-table-column>
+                                <el-table-column label="当前哈希" width="180">
+                                    <template #default="scope">
+                                        <el-tag size="small" type="info">{{ scope.row.current_hash }}</el-tag>
+                                    </template>
+                                </el-table-column>
+                                <el-table-column label="大小" width="120" sortable :sort-method="(a,b) => parseFloat(a.size) - parseFloat(b.size)">
+                                    <template #default="scope">
+                                        {{ scope.row.size }}
+                                    </template>
+                                </el-table-column>
+                                <el-table-column prop="version_count" label="版本数" width="100" align="center"></el-table-column>
+                                <el-table-column prop="asset_name" label="Asset 名称" width="200" show-overflow-tooltip></el-table-column>
+                            </el-table>
+                        </el-card>
+                    </div>
+
+                    <!-- View 4: Git Logs & Files -->
+                    <div v-if="currentView === '4'">
+                        <el-row :gutter="20">
+                            <el-col :span="14">
+                                <el-card class="mb-4">
+                                    <template #header>
+                                        <div class="card-header">
+                                            <span>最近提交日志</span>
+                                            <el-button type="primary" link @click="loadGitLogs"><el-icon><Refresh /></el-icon> 刷新</el-button>
+                                        </div>
+                                    </template>
+                                    <el-timeline>
+                                        <el-timeline-item
+                                            v-for="(activity, index) in gitLogs"
+                                            :key="index"
+                                            :timestamp="activity.date"
+                                            placement="top">
+                                            <el-card>
+                                                <h4>{{ activity.message }}</h4>
+                                                <p>{{ activity.author }} 提交于 {{ activity.date }} <el-tag size="small" type="info">{{ activity.hash }}</el-tag></p>
+                                            </el-card>
+                                        </el-timeline-item>
+                                    </el-timeline>
+                                </el-card>
+                            </el-col>
+                            <el-col :span="10">
+                                <el-card>
+                                    <template #header>
+                                        <div class="card-header">
+                                            <span>仓库文件列表 (前100)</span>
+                                            <el-button type="primary" link @click="loadRepoFiles"><el-icon><Refresh /></el-icon> 刷新</el-button>
+                                        </div>
+                                    </template>
+                                    <div style="max-height: 600px; overflow-y: auto;">
+                                        <div v-for="file in repoFiles" :key="file" style="padding: 4px 0; border-bottom: 1px solid #333; font-size: 13px;">
+                                            <el-icon style="margin-right: 5px; vertical-align: middle;"><Document /></el-icon>
+                                            {{ file }}
+                                        </div>
+                                        <div v-if="repoFiles.length === 0" style="color: #666; text-align: center; padding: 20px;">暂无文件</div>
+                                    </div>
+                                </el-card>
+                            </el-col>
+                        </el-row>
+                    </div>
+                </el-main>
+            </el-container>
+        </el-container>
+    </div>
+
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Element Plus -->
+    <script src="https://unpkg.com/element-plus"></script>
+    <!-- Icons -->
+    <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+
+    <script>
+        const { createApp, ref, onMounted, reactive, computed } = Vue;
+
+        const app = createApp({
+            setup() {
+                const currentView = ref('1');
+                const loading = ref(false);
+                const logs = ref([]);
+                const consoleRef = ref(null);
+                
+                const status = reactive({
+                    base: '',
+                    hist_dir: '',
+                    branch: '',
+                    repo: '',
+                    targets: [],
+                    excludes: [],
+                    ready: false,
+                    git_initialized: false,
+                    dirty: false,
+                    head: '',
+                    remote_head: ''
+                });
+
+                const targetsText = ref('');
+                const excludesText = ref('');
+
+                const lfsStatus = reactive({
+                    enabled: false,
+                    threshold: 0,
+                    release_tag: '',
+                    max_versions: 0,
+                    max_workers: 0
+                });
+                const lfsFiles = ref([]);
+                const lfsScanResult = ref(null);
+
+                const gitLogs = ref([]);
+                const repoFiles = ref([]);
+
+                const addLog = (msg) => {
+                    const time = new Date().toLocaleTimeString();
+                    logs.value.push({ time, msg });
+                    // Auto scroll
+                    setTimeout(() => {
+                        if (consoleRef.value) {
+                            consoleRef.value.scrollTop = consoleRef.value.scrollHeight;
+                        }
+                    }, 100);
+                };
+
+                const shortHash = (hash) => {
+                    if (!hash) return '-';
+                    return hash.substring(0, 7);
+                };
+
+                const handleMenuSelect = (index) => {
+                    currentView.value = index;
+                    if (index === '3') {
+                        loadLfsStatus();
+                        lfsList();
+                    } else if (index === '4') {
+                        loadGitLogs();
+                        loadRepoFiles();
+                    }
+                };
+
+                const loadStatus = async () => {
+                    try {
+                        const res = await fetch('/sync/api/status');
+                        const data = await res.json();
+                        Object.assign(status, data);
+                        
+                        // Update text areas if not modified by user recently (simple logic: always update on refresh)
+                        if (Array.isArray(data.targets)) targetsText.value = data.targets.join('\n');
+                        if (Array.isArray(data.excludes)) excludesText.value = data.excludes.join('\n');
+                        
+                        addLog('状态已更新');
+                    } catch (e) {
+                        ElementPlus.ElMessage.error('获取状态失败: ' + e.message);
+                        addLog('Error: ' + e.message);
+                    }
+                };
+
+                const post = async (url, body) => {
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: body ? JSON.stringify(body) : undefined
+                    });
+                    return res.json();
+                };
+
+                const doAction = async (url, name) => {
+                    loading.value = true;
+                    addLog(`开始执行: ${name}...`);
+                    try {
+                        const res = await post(url);
+                        if (res.ok) {
+                            ElementPlus.ElMessage.success(`${name} 成功`);
+                            addLog(`${name} 成功`);
+                            if (res.written !== undefined) {
+                                addLog(`写入了 ${res.written} 个 .gitkeep 文件`);
+                            }
+                            await loadStatus();
+                        } else {
+                            throw new Error(res.error || '未知错误');
+                        }
+                    } catch (e) {
+                        ElementPlus.ElMessage.error(`${name} 失败: ${e.message}`);
+                        addLog(`${name} 失败: ${e.message}`);
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const doInit = () => doAction('/sync/api/init', '初始化');
+                const doReset = () => doAction('/sync/api/reset', '强制重置');
+
+                const saveTargets = async () => {
+                    loading.value = true;
+                    try {
+                        const lines = targetsText.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                        const res = await post('/sync/api/targets', { targets: lines });
+                        if (res.ok) {
+                            ElementPlus.ElMessage.success('同步目标已保存');
+                            addLog('同步目标已保存');
+                            await loadStatus();
+                        } else {
+                            throw new Error(res.error);
+                        }
+                    } catch (e) {
+                        ElementPlus.ElMessage.error('保存失败: ' + e.message);
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const saveExcludes = async () => {
+                    loading.value = true;
+                    try {
+                        const lines = excludesText.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+                        const res = await post('/sync/api/excludes', { excludes: lines });
+                        if (res.ok) {
+                            ElementPlus.ElMessage.success('黑名单已保存');
+                            addLog('黑名单已保存');
+                            await loadStatus();
+                        } else {
+                            throw new Error(res.error);
+                        }
+                    } catch (e) {
+                        ElementPlus.ElMessage.error('保存失败: ' + e.message);
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                // LFS Functions
+                const loadLfsStatus = async () => {
+                    try {
+                        const res = await fetch('/sync/api/lfs/status');
+                        const data = await res.json();
+                        Object.assign(lfsStatus, data);
+                    } catch (e) {
+                        console.error(e);
+                    }
+                };
+
+                const lfsScan = async () => {
+                    loading.value = true;
+                    lfsScanResult.value = null;
+                    addLog('开始扫描大文件...');
+                    try {
+                        const res = await post('/sync/api/lfs/scan');
+                        if (res.ok) {
+                            lfsScanResult.value = res;
+                            addLog(`扫描完成，发现 ${res.count} 个大文件`);
+                        } else {
+                            throw new Error(res.error);
+                        }
+                    } catch (e) {
+                        ElementPlus.ElMessage.error('扫描失败: ' + e.message);
+                        addLog('扫描失败: ' + e.message);
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                const lfsUpload = async () => {
+                    await doAction('/sync/api/lfs/upload', '上传大文件');
+                };
+
+                const lfsRestore = () => doAction('/sync/api/lfs/restore', '恢复 LFS 文件');
+
+                const lfsList = async () => {
+                    loading.value = true;
+                    try {
+                        const res = await fetch('/sync/api/lfs/list');
+                        const data = await res.json();
+                        if (data.ok) {
+                            lfsFiles.value = data.files;
+                        } else {
+                            throw new Error(data.error);
+                        }
+                    } catch (e) {
+                        ElementPlus.ElMessage.error('获取 LFS 列表失败: ' + e.message);
+                    } finally {
+                        loading.value = false;
+                    }
+                };
+
+                // New API Functions
+                const loadGitLogs = async () => {
+                    try {
+                        const res = await fetch('/sync/api/logs');
+                        const data = await res.json();
+                        if (data.ok) {
+                            gitLogs.value = data.logs;
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    }
+                };
+
+                const loadRepoFiles = async () => {
+                    try {
+                        const res = await fetch('/sync/api/files');
+                        const data = await res.json();
+                        if (data.ok) {
+                            repoFiles.value = data.files;
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    }
+                };
+
+                onMounted(() => {
+                    loadStatus();
+                });
+
+                return {
+                    currentView,
+                    loading,
+                    logs,
+                    consoleRef,
+                    status,
+                    targetsText,
+                    excludesText,
+                    lfsStatus,
+                    lfsFiles,
+                    lfsScanResult,
+                    gitLogs,
+                    repoFiles,
+                    handleMenuSelect,
+                    loadStatus,
+                    doAction,
+                    doInit,
+                    doReset,
+                    saveTargets,
+                    saveExcludes,
+                    lfsScan,
+                    lfsUpload,
+                    lfsRestore,
+                    lfsList,
+                    loadGitLogs,
+                    loadRepoFiles,
+                    shortHash
+                };
             }
-          }else{
-            alert('扫描失败: '+(j.error||'未知错误'));
-          }
-        }catch(e){ alert('请求失败: '+e); }
-        finally{ btn.disabled = false; }
-      }
-      async function lfsUpload(btn){
-        btn.disabled = true;
-        try{
-          const j = await post('/sync/api/lfs/upload');
-          alert(j.ok? '✓ 大文件已上传' : ('上传失败: '+(j.error||'未知错误')));
-          if(j.ok) await lfsScan(document.getElementById('btnLfsScan'));
-        }catch(e){ alert('请求失败: '+e); }
-        finally{ btn.disabled = false; }
-      }
-      async function lfsRestore(btn){
-        btn.disabled = true;
-        try{
-          const j = await post('/sync/api/lfs/restore');
-          alert(j.ok? '✓ LFS 文件已恢复' : ('恢复失败: '+(j.error||'未知错误')));
-        }catch(e){ alert('请求失败: '+e); }
-        finally{ btn.disabled = false; }
-      }
-      async function lfsList(btn){
-        btn.disabled = true;
-        try{
-          const res = await fetch('/sync/api/lfs/list');
-          const j = await res.json();
-          if(j.ok){
-            document.getElementById('lfsFileList').style.display = '';
-            const tbody = document.getElementById('lfsFileTableBody');
-            tbody.innerHTML = '';
-            if(j.count === 0){
-              tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#6b7280">暂无 LFS 管理的文件</td></tr>';
-            }else{
-              j.files.forEach(f=>{
-                const row = tbody.insertRow();
-                row.insertCell(0).textContent = f.path;
-                row.insertCell(1).innerHTML = `<code>${f.current_hash}</code>`;
-                row.insertCell(2).textContent = (f.size / 1024 / 1024).toFixed(2) + ' MB';
-                row.insertCell(3).textContent = f.version_count;
-                row.insertCell(4).innerHTML = `<code style="font-size:11px">${f.asset_name}</code>`;
-              });
-            }
-          }else{
-            alert('列表失败: '+(j.error||'未知错误'));
-          }
-        }catch(e){ alert('请求失败: '+e); }
-        finally{ btn.disabled = false; }
-      }
-      
-      document.getElementById('btnLfsStatus').onclick = (e)=>lfsStatus(e.target);
-      document.getElementById('btnLfsScan').onclick = (e)=>lfsScan(e.target);
-      document.getElementById('btnLfsUpload').onclick = (e)=>lfsUpload(e.target);
-      document.getElementById('btnLfsRestore').onclick = (e)=>lfsRestore(e.target);
-      document.getElementById('btnLfsList').onclick = (e)=>lfsList(e.target);
-      
-      loadStatus();
+        });
+
+        // Register Icons
+        for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+            app.component(key, component);
+        }
+
+        app.use(ElementPlus);
+        app.mount('#app');
     </script>
-  </body>
-  </html>
+</body>
+</html>

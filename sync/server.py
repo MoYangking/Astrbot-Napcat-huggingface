@@ -211,6 +211,61 @@ def create_app(daemon=None):
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+    # 新增 API：Git 日志
+    @app.get("/sync/api/logs")
+    def api_logs(n: int = 20):
+        """获取最近 n 条提交日志。"""
+        st = load_settings()
+        try:
+            # %h: short hash, %s: subject, %cr: committer date, relative, %an: author name
+            cmd = ["git", "log", f"-n{n}", "--pretty=format:%h|%s|%cr|%an"]
+            res = git_ops.run(cmd, cwd=st.hist_dir, check=False)
+            if res.returncode != 0:
+                return {"ok": False, "error": res.stderr}
+            
+            logs = []
+            for line in res.stdout.strip().splitlines():
+                parts = line.split("|")
+                if len(parts) >= 4:
+                    logs.append({
+                        "hash": parts[0],
+                        "message": parts[1],
+                        "date": parts[2],
+                        "author": parts[3]
+                    })
+            return {"ok": True, "logs": logs}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    # 新增 API：强制重置
+    @app.post("/sync/api/reset")
+    def api_reset():
+        """强制重置本地更改：git reset --hard HEAD && git clean -fd"""
+        st = load_settings()
+        try:
+            git_ops.run(["git", "reset", "--hard", "HEAD"], cwd=st.hist_dir)
+            git_ops.run(["git", "clean", "-fd"], cwd=st.hist_dir)
+            return {"ok": True}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+    # 新增 API：列出文件
+    @app.get("/sync/api/files")
+    def api_files(limit: int = 100):
+        """列出当前仓库文件（git ls-files）。"""
+        st = load_settings()
+        try:
+            res = git_ops.run(["git", "ls-files"], cwd=st.hist_dir, check=False)
+            if res.returncode != 0:
+                return {"ok": False, "error": res.stderr}
+            
+            all_files = res.stdout.strip().splitlines()
+            count = len(all_files)
+            files = all_files[:limit]
+            return {"ok": True, "files": files, "total": count, "limit": limit}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
     # LFS 大文件管理 API
     @app.get("/sync/api/lfs/status")
     def api_lfs_status():

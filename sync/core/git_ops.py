@@ -53,6 +53,14 @@ def ensure_repo(hist_dir: str, branch: str) -> None:
     run(["git", "config", "user.name", name], cwd=hist_dir, check=False)
     run(["git", "config", "user.email", email], cwd=hist_dir, check=False)
     run(["git", "config", "pull.rebase", "true"], cwd=hist_dir, check=False)
+    
+    # Performance optimizations for faster Git operations
+    run(["git", "config", "http.postBuffer", "524288000"], cwd=hist_dir, check=False)  # 500MB buffer
+    run(["git", "config", "http.lowSpeedLimit", "0"], cwd=hist_dir, check=False)  # Disable speed limit check
+    run(["git", "config", "http.lowSpeedTime", "999999"], cwd=hist_dir, check=False)  # Long timeout
+    run(["git", "config", "core.compression", "0"], cwd=hist_dir, check=False)  # Disable compression for speed
+    run(["git", "config", "pack.windowMemory", "256m"], cwd=hist_dir, check=False)  # Increase pack window memory
+    run(["git", "config", "pack.packSizeLimit", "256m"], cwd=hist_dir, check=False)  # Limit pack size
 
 
 def set_remote(hist_dir: str, url: str) -> None:
