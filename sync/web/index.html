@@ -30,6 +30,7 @@
             align-items: center;
             justify-content: space-between;
             padding: 0 20px;
+            height: 60px;
         }
         .logo {
             font-size: 1.2rem;
@@ -42,6 +43,7 @@
         .el-aside {
             background-color: #1e1e20;
             border-right: 1px solid #363637;
+            transition: width 0.3s;
         }
         .el-main {
             background-color: #141414;
@@ -51,6 +53,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         .status-item {
             margin-bottom: 10px;
@@ -80,6 +84,30 @@
         .mr-2 { margin-right: 0.5rem; }
         .w-full { width: 100%; }
         
+        /* Mobile Adaptations */
+        @media (max-width: 768px) {
+            .el-aside {
+                display: none;
+            }
+            .el-header {
+                padding: 0 10px;
+            }
+            .logo span {
+                display: none;
+            }
+            .el-main {
+                padding: 10px;
+            }
+            .mobile-menu-btn {
+                display: inline-flex !important;
+            }
+        }
+        @media (min-width: 769px) {
+            .mobile-menu-btn {
+                display: none !important;
+            }
+        }
+
         /* Custom Scrollbar */
         ::-webkit-scrollbar {
             width: 8px;
@@ -101,19 +129,23 @@
     <div id="app">
         <el-container>
             <el-header>
-                <div class="logo">
-                    <el-icon><Data-Analysis /></el-icon>
-                    Sync 管理器
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <el-button class="mobile-menu-btn" icon="Menu" circle @click="drawerVisible = true"></el-button>
+                    <div class="logo">
+                        <el-icon><Data-Analysis /></el-icon>
+                        <span>Sync 管理器</span>
+                    </div>
                 </div>
                 <div>
-                    <el-tag v-if="status.ready" type="success" effect="dark">就绪</el-tag>
-                    <el-tag v-else type="warning" effect="dark">未就绪</el-tag>
+                    <el-tag v-if="status.ready" type="success" effect="dark" size="small">就绪</el-tag>
+                    <el-tag v-else type="warning" effect="dark" size="small">未就绪</el-tag>
                 </div>
             </el-header>
             <el-container>
+                <!-- Desktop Sidebar -->
                 <el-aside width="220px">
                     <el-menu
-                        default-active="1"
+                        :default-active="currentView"
                         background-color="#1e1e20"
                         text-color="#fff"
                         active-text-color="#409eff"
@@ -137,16 +169,53 @@
                         </el-menu-item>
                     </el-menu>
                 </el-aside>
+
+                <!-- Mobile Drawer Menu -->
+                <el-drawer
+                    v-model="drawerVisible"
+                    title="菜单"
+                    direction="ltr"
+                    size="240px"
+                    :with-header="false">
+                    <div style="padding: 20px; font-size: 1.2rem; font-weight: 600; color: #409eff; display: flex; align-items: center; gap: 10px;">
+                        <el-icon><Data-Analysis /></el-icon> Sync 管理器
+                    </div>
+                    <el-menu
+                        :default-active="currentView"
+                        background-color="transparent"
+                        text-color="#fff"
+                        active-text-color="#409eff"
+                        style="border-right: none;"
+                        @select="handleMenuSelect">
+                        <el-menu-item index="1">
+                            <el-icon><Odometer /></el-icon>
+                            <span>概览 & 操作</span>
+                        </el-menu-item>
+                        <el-menu-item index="2">
+                            <el-icon><Setting /></el-icon>
+                            <span>配置管理</span>
+                        </el-menu-item>
+                        <el-menu-item index="3">
+                            <el-icon><Files /></el-icon>
+                            <span>LFS 管理</span>
+                        </el-menu-item>
+                        <el-menu-item index="4">
+                            <el-icon><List /></el-icon>
+                            <span>Git 日志 & 文件</span>
+                        </el-menu-item>
+                    </el-menu>
+                </el-drawer>
+
                 <el-main>
                     <!-- View 1: Dashboard -->
                     <div v-if="currentView === '1'">
                         <el-row :gutter="20">
-                            <el-col :span="16">
+                            <el-col :xs="24" :sm="24" :md="16" :lg="16" :xl="16">
                                 <el-card class="mb-4">
                                     <template #header>
                                         <div class="card-header">
                                             <span>常用操作</span>
-                                            <el-button type="primary" link @click="loadStatus"><el-icon><Refresh /></el-icon> 刷新状态</el-button>
+                                            <el-button type="primary" link @click="loadStatus"><el-icon><Refresh /></el-icon> 刷新</el-button>
                                         </div>
                                     </template>
                                     <div style="display: flex; gap: 10px; flex-wrap: wrap;">
@@ -155,14 +224,14 @@
                                         <el-button type="warning" @click="doAction('/sync/api/pull', '仅拉取')" :loading="loading">仅拉取</el-button>
                                         <el-button type="info" @click="doAction('/sync/api/relink', '重新链接')" :loading="loading">重新链接</el-button>
                                         <el-button @click="doAction('/sync/api/track-empty', '跟踪空目录')" :loading="loading">跟踪空目录</el-button>
-                                        <el-popconfirm title="确定要执行初始化吗？这可能需要一些时间。" @confirm="doInit">
+                                        <el-popconfirm title="确定要执行初始化吗？" @confirm="doInit">
                                             <template #reference>
-                                                <el-button type="danger" :loading="loading">执行初始化</el-button>
+                                                <el-button type="danger" :loading="loading">初始化</el-button>
                                             </template>
                                         </el-popconfirm>
-                                        <el-popconfirm title="确定要强制重置吗？这将丢失所有未提交的更改！" @confirm="doReset">
+                                        <el-popconfirm title="确定要强制重置吗？" @confirm="doReset">
                                             <template #reference>
-                                                <el-button type="danger" plain :loading="loading">强制重置</el-button>
+                                                <el-button type="danger" plain :loading="loading">重置</el-button>
                                             </template>
                                         </el-popconfirm>
                                     </div>
@@ -171,7 +240,7 @@
                                 <el-card class="mb-4">
                                     <template #header>
                                         <div class="card-header">
-                                            <span>系统日志 / 输出</span>
+                                            <span>系统日志</span>
                                             <el-button type="info" link size="small" @click="logs = []">清空</el-button>
                                         </div>
                                     </template>
@@ -183,7 +252,7 @@
                                     </div>
                                 </el-card>
                             </el-col>
-                            <el-col :span="8">
+                            <el-col :xs="24" :sm="24" :md="8" :lg="8" :xl="8">
                                 <el-card class="mb-4">
                                     <template #header>
                                         <div class="card-header">
@@ -195,7 +264,7 @@
                                         <el-tag :type="status.git_initialized ? 'success' : 'danger'" size="small">{{ status.git_initialized ? '是' : '否' }}</el-tag>
                                     </div>
                                     <div class="status-item">
-                                        <span class="status-label">未提交变更 (Dirty)</span>
+                                        <span class="status-label">未提交变更</span>
                                         <el-tag :type="status.dirty ? 'warning' : 'success'" size="small">{{ status.dirty ? '是' : '否' }}</el-tag>
                                     </div>
                                     <div class="status-item">
@@ -204,13 +273,13 @@
                                     </div>
                                     <el-divider content-position="left">HEAD 信息</el-divider>
                                     <div class="status-item">
-                                        <span class="status-label">本地 (Local)</span>
+                                        <span class="status-label">本地</span>
                                         <el-tooltip :content="status.head" placement="top">
                                             <span class="status-value">{{ shortHash(status.head) }}</span>
                                         </el-tooltip>
                                     </div>
                                     <div class="status-item">
-                                        <span class="status-label">远端 (Remote)</span>
+                                        <span class="status-label">远端</span>
                                         <el-tooltip :content="status.remote_head" placement="top">
                                             <span class="status-value">{{ shortHash(status.remote_head) }}</span>
                                         </el-tooltip>
@@ -229,11 +298,11 @@
                                         </div>
                                     </template>
                                     <div class="status-item">
-                                        <span class="status-label">基础目录 (Base Dir)</span>
+                                        <span class="status-label">基础目录</span>
                                     </div>
                                     <div style="font-size: 12px; color: #999; word-break: break-all; margin-bottom: 10px;">{{ status.base }}</div>
                                     <div class="status-item">
-                                        <span class="status-label">历史目录 (Hist Dir)</span>
+                                        <span class="status-label">历史目录</span>
                                     </div>
                                     <div style="font-size: 12px; color: #999; word-break: break-all;">{{ status.hist_dir }}</div>
                                 </el-card>
@@ -244,11 +313,11 @@
                     <!-- View 2: Configuration -->
                     <div v-if="currentView === '2'">
                         <el-row :gutter="20">
-                            <el-col :span="12">
-                                <el-card>
+                            <el-col :xs="24" :sm="24" :md="12">
+                                <el-card class="mb-4">
                                     <template #header>
                                         <div class="card-header">
-                                            <span>同步目标 (Targets)</span>
+                                            <span>同步目标</span>
                                             <el-button type="primary" size="small" @click="saveTargets" :loading="loading">保存</el-button>
                                         </div>
                                     </template>
@@ -261,11 +330,11 @@
                                     />
                                 </el-card>
                             </el-col>
-                            <el-col :span="12">
+                            <el-col :xs="24" :sm="24" :md="12">
                                 <el-card>
                                     <template #header>
                                         <div class="card-header">
-                                            <span>黑名单 (Excludes)</span>
+                                            <span>黑名单</span>
                                             <el-button type="primary" size="small" @click="saveExcludes" :loading="loading">保存</el-button>
                                         </div>
                                     </template>
@@ -287,22 +356,28 @@
                             <template #header>
                                 <div class="card-header">
                                     <span>LFS 操作</span>
-                                    <el-tag v-if="lfsStatus.enabled" type="success">LFS 已启用</el-tag>
-                                    <el-tag v-else type="info">LFS 未启用</el-tag>
+                                    <el-tag v-if="lfsStatus.enabled" type="success">已启用</el-tag>
+                                    <el-tag v-else type="info">未启用</el-tag>
                                 </div>
                             </template>
                             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
-                                <el-button type="primary" @click="lfsScan" :loading="loading">扫描大文件</el-button>
-                                <el-button type="success" @click="lfsUpload" :loading="loading">上传大文件</el-button>
-                                <el-button type="warning" @click="lfsRestore" :loading="loading">恢复 LFS 文件</el-button>
-                                <el-button type="info" @click="lfsList" :loading="loading">刷新列表</el-button>
+                                <el-button type="primary" @click="lfsScan" :loading="loading">扫描</el-button>
+                                <el-button type="success" @click="lfsUpload" :loading="loading">上传</el-button>
+                                <el-button type="warning" @click="lfsRestore" :loading="loading">恢复</el-button>
+                                <el-button type="info" @click="lfsList" :loading="loading">刷新</el-button>
                             </div>
                             
-                            <el-descriptions title="LFS 配置信息" :column="4" border>
-                                <el-descriptions-item label="大小阈值">{{ (lfsStatus.threshold / 1024 / 1024).toFixed(0) }} MB</el-descriptions-item>
-                                <el-descriptions-item label="Release 标签">{{ lfsStatus.release_tag }}</el-descriptions-item>
-                                <el-descriptions-item label="最大版本数">{{ lfsStatus.max_versions }}</el-descriptions-item>
-                                <el-descriptions-item label="并发数">{{ lfsStatus.max_workers }}</el-descriptions-item>
+                            <el-descriptions title="配置信息" :column="1" border class="hidden-md-and-up">
+                                <el-descriptions-item label="阈值">{{ (lfsStatus.threshold / 1024 / 1024).toFixed(0) }} MB</el-descriptions-item>
+                                <el-descriptions-item label="Release">{{ lfsStatus.release_tag }}</el-descriptions-item>
+                                <el-descriptions-item label="版本数">{{ lfsStatus.max_versions }}</el-descriptions-item>
+                                <el-descriptions-item label="并发">{{ lfsStatus.max_workers }}</el-descriptions-item>
+                            </el-descriptions>
+                            <el-descriptions title="配置信息" :column="4" border class="hidden-sm-and-down">
+                                <el-descriptions-item label="阈值">{{ (lfsStatus.threshold / 1024 / 1024).toFixed(0) }} MB</el-descriptions-item>
+                                <el-descriptions-item label="Release">{{ lfsStatus.release_tag }}</el-descriptions-item>
+                                <el-descriptions-item label="版本数">{{ lfsStatus.max_versions }}</el-descriptions-item>
+                                <el-descriptions-item label="并发">{{ lfsStatus.max_workers }}</el-descriptions-item>
                             </el-descriptions>
                         </el-card>
 
@@ -324,7 +399,7 @@
                                 </el-alert>
                                 <el-alert
                                     v-else
-                                    :title="`发现 ${lfsScanResult.count} 个大文件 (>${lfsScanResult.threshold_mb} MB)`"
+                                    :title="`发现 ${lfsScanResult.count} 个大文件`"
                                     type="warning"
                                     show-icon
                                     :closable="false">
@@ -336,19 +411,17 @@
 
                             <!-- Managed Files List -->
                             <el-table :data="lfsFiles" style="width: 100%" stripe border v-if="lfsFiles.length > 0">
-                                <el-table-column prop="path" label="文件路径" sortable></el-table-column>
-                                <el-table-column label="当前哈希" width="180">
+                                <el-table-column prop="path" label="路径" sortable min-width="150"></el-table-column>
+                                <el-table-column label="哈希" width="100" class-name="hidden-xs-only">
                                     <template #default="scope">
                                         <el-tag size="small" type="info">{{ scope.row.current_hash }}</el-tag>
                                     </template>
                                 </el-table-column>
-                                <el-table-column label="大小" width="120" sortable :sort-method="(a,b) => parseFloat(a.size) - parseFloat(b.size)">
+                                <el-table-column label="大小" width="100" sortable :sort-method="(a,b) => parseFloat(a.size) - parseFloat(b.size)">
                                     <template #default="scope">
                                         {{ scope.row.size }}
                                     </template>
                                 </el-table-column>
-                                <el-table-column prop="version_count" label="版本数" width="100" align="center"></el-table-column>
-                                <el-table-column prop="asset_name" label="Asset 名称" width="200" show-overflow-tooltip></el-table-column>
                             </el-table>
                         </el-card>
                     </div>
@@ -356,11 +429,11 @@
                     <!-- View 4: Git Logs & Files -->
                     <div v-if="currentView === '4'">
                         <el-row :gutter="20">
-                            <el-col :span="14">
+                            <el-col :xs="24" :sm="24" :md="14">
                                 <el-card class="mb-4">
                                     <template #header>
                                         <div class="card-header">
-                                            <span>最近提交日志</span>
+                                            <span>最近提交</span>
                                             <el-button type="primary" link @click="loadGitLogs"><el-icon><Refresh /></el-icon> 刷新</el-button>
                                         </div>
                                     </template>
@@ -372,17 +445,17 @@
                                             placement="top">
                                             <el-card>
                                                 <h4>{{ activity.message }}</h4>
-                                                <p>{{ activity.author }} 提交于 {{ activity.date }} <el-tag size="small" type="info">{{ activity.hash }}</el-tag></p>
+                                                <p>{{ activity.author }} <el-tag size="small" type="info">{{ activity.hash }}</el-tag></p>
                                             </el-card>
                                         </el-timeline-item>
                                     </el-timeline>
                                 </el-card>
                             </el-col>
-                            <el-col :span="10">
+                            <el-col :xs="24" :sm="24" :md="10">
                                 <el-card>
                                     <template #header>
                                         <div class="card-header">
-                                            <span>仓库文件列表 (前100)</span>
+                                            <span>文件列表</span>
                                             <el-button type="primary" link @click="loadRepoFiles"><el-icon><Refresh /></el-icon> 刷新</el-button>
                                         </div>
                                     </template>
@@ -416,6 +489,7 @@
             setup() {
                 const currentView = ref('1');
                 const loading = ref(false);
+                const drawerVisible = ref(false);
                 const logs = ref([]);
                 const consoleRef = ref(null);
                 
@@ -467,6 +541,7 @@
 
                 const handleMenuSelect = (index) => {
                     currentView.value = index;
+                    drawerVisible.value = false; // Close drawer on mobile
                     if (index === '3') {
                         loadLfsStatus();
                         lfsList();
@@ -482,7 +557,6 @@
                         const data = await res.json();
                         Object.assign(status, data);
                         
-                        // Update text areas if not modified by user recently (simple logic: always update on refresh)
                         if (Array.isArray(data.targets)) targetsText.value = data.targets.join('\n');
                         if (Array.isArray(data.excludes)) excludesText.value = data.excludes.join('\n');
                         
@@ -652,6 +726,7 @@
                 return {
                     currentView,
                     loading,
+                    drawerVisible,
                     logs,
                     consoleRef,
                     status,
