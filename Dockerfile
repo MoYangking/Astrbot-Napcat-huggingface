@@ -150,6 +150,8 @@ RUN chmod +x /home/user/scripts/wait-for-sync.sh
 ENV DISPLAY=:1 \
     LIBGL_ALWAYS_SOFTWARE=1 \
     NAPCAT_SOCKS5="" \
+    NAPCAT_SOCKS5_USER="" \
+    NAPCAT_SOCKS5_PASS="" \
     NAPCAT_PROXYCHAINS_CONF="/home/user/.proxychains.conf" \
     NAPCAT_FLAGS=""
 
