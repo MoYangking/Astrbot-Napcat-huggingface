@@ -41,6 +41,10 @@ EOF
     LAUNCH_PREFIX="proxychains4 -f /app/.config/proxychains4.conf"
 fi
 
-# Always use extracted AppRun to avoid proxychains conflicts with AppImage mounting
-# When proxychains is enabled, it interferes with AppImage's FUSE filesystem operations
+# Try AppImage extract-and-run first for correct runtime env
+if [ -x /home/user/QQ.AppImage ]; then
+  exec $LAUNCH_PREFIX /home/user/QQ.AppImage --appimage-extract-and-run ${NAPCAT_FLAGS:-}
+fi
+
+# Fallback to extracted AppRun
 exec $LAUNCH_PREFIX /home/user/napcat/AppRun ${NAPCAT_FLAGS:-}
