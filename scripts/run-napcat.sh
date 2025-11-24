@@ -18,7 +18,6 @@ MAJOR_NODE_PATH="$NAPCAT_DIR/resources/app/major.node"
 # Proxy Configuration
 PROXY_ENABLE="${PROXY_ENABLE:-false}"
 LAUNCH_PREFIX=""
-CURL_PROXY_PREFIX=""
 
 if [ "$PROXY_ENABLE" = "true" ]; then
     echo "Configuring Proxychains..."
@@ -45,52 +44,7 @@ EOF
     fi
 
     LAUNCH_PREFIX="proxychains4 -f /app/.config/proxychains4.conf"
-    CURL_PROXY_PREFIX="$LAUNCH_PREFIX"
 fi
-
-extract_appimage() {
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    if ! (
-        cd "$tmpdir"
-        "$APPIMAGE_PATH" --appimage-extract >/dev/null
-    ); then
-        rm -rf "$tmpdir"
-        return 1
-    fi
-
-    if [ ! -d "$tmpdir/squashfs-root" ]; then
-        rm -rf "$tmpdir"
-        return 1
-    fi
-
-    rm -rf "$NAPCAT_DIR"
-    mv "$tmpdir/squashfs-root" "$NAPCAT_DIR"
-    rm -rf "$tmpdir"
-    return 0
-}
-
-download_appimage() {
-    local url="${NAPCAT_DOWNLOAD_URL:-}"
-    if [ -z "$url" ]; then
-        url="$($CURL_PROXY_PREFIX curl -fsSL https://api.github.com/repos/NapNeko/NapCatAppImageBuild/releases/latest \
-            | jq -r '.assets[] | select(.name | endswith("-amd64.AppImage")) | .browser_download_url' \
-            | head -1)"
-    fi
-    if [ -z "$url" ]; then
-        echo "无法获取 NapCat AppImage 下载链接，请手动设置 NAPCAT_DOWNLOAD_URL。" >&2
-        return 1
-    fi
-    echo "下载新的 NapCat AppImage..."
-    $CURL_PROXY_PREFIX curl -L -o "$APPIMAGE_PATH" "$url"
-    chmod +x "$APPIMAGE_PATH"
-    return 0
-}
-
-refresh_appimage_and_extract() {
-    download_appimage || return 1
-    extract_appimage || return 1
-}
 
 # Ensure extracted NapCat tree is healthy (major.node is required for NapCat preload)
 ensure_napcat_tree() {
@@ -99,29 +53,20 @@ ensure_napcat_tree() {
     fi
 
     if [ ! -x "$APPIMAGE_PATH" ]; then
-        echo "NapCat AppImage not found at $APPIMAGE_PATH; attempting to download..." >&2
-        refresh_appimage_and_extract || {
-            echo "下载或解压 NapCat AppImage 失败，请检查网络/代理配置。" >&2
-            exit 1
-        }
-        if [ -f "$MAJOR_NODE_PATH" ]; then
-            return
-        fi
+        echo "NapCat AppImage not found at $APPIMAGE_PATH; cannot repair extracted files." >&2
+        exit 1
     fi
 
     echo "NapCat extracted files missing or corrupted, re-extracting AppImage..."
-    if ! extract_appimage; then
-        echo "解压失败，尝试重新下载 AppImage..."
-        refresh_appimage_and_extract || {
-            echo "重新下载解压 NapCat 仍失败，请手动检查 AppImage。" >&2
-            exit 1
-        }
-    fi
-
-    if [ ! -f "$MAJOR_NODE_PATH" ]; then
-        echo "major.node 仍未找到，请确认 NapCat AppImage 是否完整。" >&2
-        exit 1
-    fi
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    (
+        cd "$tmpdir"
+        "$APPIMAGE_PATH" --appimage-extract >/dev/null
+    )
+    rm -rf "$NAPCAT_DIR"
+    mv "$tmpdir/squashfs-root" "$NAPCAT_DIR"
+    rm -rf "$tmpdir"
 }
 
 ensure_napcat_tree
