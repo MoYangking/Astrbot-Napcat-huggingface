@@ -76,22 +76,9 @@
             .mobile-menu-btn {
                 display: inline-flex !important;
             }
-            /* Hide table on mobile, show cards */
-            .desktop-table {
-                display: none !important;
-            }
-            .mobile-cards {
-                display: block !important;
-            }
         }
         @media (min-width: 769px) {
             .mobile-menu-btn {
-                display: none !important;
-            }
-            .desktop-table {
-                display: block !important;
-            }
-            .mobile-cards {
                 display: none !important;
             }
         }
@@ -122,36 +109,6 @@
         .login-card {
             width: 100%;
             max-width: 400px;
-        }
-        
-        .rule-card {
-            margin-bottom: 12px;
-            border: 1px solid #363637;
-            background-color: #1d1e1f;
-        }
-        .rule-card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        .rule-card-body {
-            font-size: 14px;
-            color: #cfd3dc;
-        }
-        .rule-card-row {
-            margin-bottom: 4px;
-            display: flex;
-            align-items: flex-start;
-        }
-        .rule-card-label {
-            color: #909399;
-            width: 70px;
-            flex-shrink: 0;
-        }
-        .rule-card-value {
-            flex: 1;
-            word-break: break-all;
         }
     </style>
 </head>
@@ -301,9 +258,9 @@
                                 <div class="card-header">
                                     <span>高级规则管理</span>
                                     <div>
-                                        <el-button type="success" icon="Plus" @click="openRuleEditor()">添加</el-button>
-                                        <el-button type="warning" icon="Edit" @click="jsonMode = !jsonMode">{{ jsonMode ? '列表' : 'JSON' }}</el-button>
-                                        <el-button type="primary" icon="Check" @click="saveRules" :loading="loading">保存</el-button>
+                                        <el-button type="success" icon="Plus" @click="openRuleEditor()">添加规则</el-button>
+                                        <el-button type="warning" icon="Edit" @click="jsonMode = !jsonMode">{{ jsonMode ? '切换列表视图' : '切换 JSON 模式' }}</el-button>
+                                        <el-button type="primary" icon="Check" @click="saveRules" :loading="loading">保存所有更改</el-button>
                                     </div>
                                 </div>
                             </template>
@@ -321,79 +278,36 @@
 
                             <!-- List Mode -->
                             <div v-else>
-                                <!-- Desktop Table -->
-                                <div class="desktop-table">
-                                    <el-table :data="config.rules" style="width: 100%" stripe border empty-text="暂无规则">
-                                        <el-table-column prop="priority" label="优先级" width="80" sortable></el-table-column>
-                                        <el-table-column prop="id" label="ID" width="120" show-overflow-tooltip></el-table-column>
-                                        <el-table-column label="匹配条件" min-width="200">
-                                            <template #default="scope">
-                                                <div v-if="scope.row.match">
-                                                    <el-tag v-if="scope.row.match.host" size="small" type="info">Host: {{ scope.row.match.host }}</el-tag>
-                                                    <el-tag v-if="scope.row.match.path_prefix" size="small" type="warning">Path: {{ scope.row.match.path_prefix }}</el-tag>
-                                                    <el-tag v-if="scope.row.match.method" size="small">Method: {{ scope.row.match.method }}</el-tag>
-                                                </div>
-                                            </template>
-                                        </el-table-column>
-                                        <el-table-column prop="action" label="动作" width="100">
-                                            <template #default="scope">
-                                                <el-tag :type="scope.row.action === 'redirect' ? 'warning' : 'success'">{{ scope.row.action }}</el-tag>
-                                            </template>
-                                        </el-table-column>
-                                        <el-table-column label="目标" min-width="200" show-overflow-tooltip>
-                                            <template #default="scope">
-                                                <span v-if="scope.row.action === 'proxy'">{{ scope.row.backend }}</span>
-                                                <span v-else>{{ scope.row.redirect_to || scope.row.redirect_to_prefix + '...' }}</span>
-                                            </template>
-                                        </el-table-column>
-                                        <el-table-column label="操作" width="150" fixed="right">
-                                            <template #default="scope">
-                                                <el-button size="small" @click="openRuleEditor(scope.row, scope.$index)">编辑</el-button>
-                                                <el-button size="small" type="danger" @click="deleteRule(scope.$index)">删除</el-button>
-                                            </template>
-                                        </el-table-column>
-                                    </el-table>
-                                </div>
-
-                                <!-- Mobile Cards -->
-                                <div class="mobile-cards">
-                                    <div v-if="config.rules.length === 0" style="text-align: center; color: #909399; padding: 20px;">暂无规则</div>
-                                    <el-card v-for="(rule, index) in config.rules" :key="index" class="rule-card" :body-style="{ padding: '12px' }">
-                                        <div class="rule-card-header">
-                                            <div>
-                                                <el-tag size="small" effect="dark">{{ rule.priority }}</el-tag>
-                                                <span style="margin-left: 8px; font-weight: bold;">{{ rule.id || '未命名' }}</span>
+                                <el-table :data="config.rules" style="width: 100%" stripe border empty-text="暂无规则">
+                                    <el-table-column prop="priority" label="优先级" width="80" sortable></el-table-column>
+                                    <el-table-column prop="id" label="ID" width="120" show-overflow-tooltip></el-table-column>
+                                    <el-table-column label="匹配条件" min-width="200">
+                                        <template #default="scope">
+                                            <div v-if="scope.row.match">
+                                                <el-tag v-if="scope.row.match.host" size="small" type="info">Host: {{ scope.row.match.host }}</el-tag>
+                                                <el-tag v-if="scope.row.match.path_prefix" size="small" type="warning">Path: {{ scope.row.match.path_prefix }}</el-tag>
+                                                <el-tag v-if="scope.row.match.method" size="small">Method: {{ scope.row.match.method }}</el-tag>
                                             </div>
-                                            <div>
-                                                <el-button size="small" icon="Edit" circle @click="openRuleEditor(rule, index)"></el-button>
-                                                <el-button size="small" type="danger" icon="Delete" circle @click="deleteRule(index)"></el-button>
-                                            </div>
-                                        </div>
-                                        <div class="rule-card-body">
-                                            <div class="rule-card-row">
-                                                <span class="rule-card-label">动作:</span>
-                                                <span class="rule-card-value">
-                                                    <el-tag size="small" :type="rule.action === 'redirect' ? 'warning' : 'success'">{{ rule.action }}</el-tag>
-                                                </span>
-                                            </div>
-                                            <div class="rule-card-row">
-                                                <span class="rule-card-label">目标:</span>
-                                                <span class="rule-card-value">
-                                                    <span v-if="rule.action === 'proxy'">{{ rule.backend }}</span>
-                                                    <span v-else>{{ rule.redirect_to || rule.redirect_to_prefix + '...' }}</span>
-                                                </span>
-                                            </div>
-                                            <div class="rule-card-row" v-if="rule.match">
-                                                <span class="rule-card-label">匹配:</span>
-                                                <span class="rule-card-value">
-                                                    <div v-if="rule.match.host">Host: {{ rule.match.host }}</div>
-                                                    <div v-if="rule.match.path_prefix">Path: {{ rule.match.path_prefix }}</div>
-                                                    <div v-if="rule.match.method">Method: {{ rule.match.method }}</div>
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </el-card>
-                                </div>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column prop="action" label="动作" width="100">
+                                        <template #default="scope">
+                                            <el-tag :type="scope.row.action === 'redirect' ? 'warning' : 'success'">{{ scope.row.action }}</el-tag>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column label="目标" min-width="200" show-overflow-tooltip>
+                                        <template #default="scope">
+                                            <span v-if="scope.row.action === 'proxy'">{{ scope.row.backend }}</span>
+                                            <span v-else>{{ scope.row.redirect_to || scope.row.redirect_to_prefix + '...' }}</span>
+                                        </template>
+                                    </el-table-column>
+                                    <el-table-column label="操作" width="150" fixed="right">
+                                        <template #default="scope">
+                                            <el-button size="small" @click="openRuleEditor(scope.row, scope.$index)">编辑</el-button>
+                                            <el-button size="small" type="danger" @click="deleteRule(scope.$index)">删除</el-button>
+                                        </template>
+                                    </el-table-column>
+                                </el-table>
                             </div>
                         </el-card>
                     </div>
@@ -478,7 +392,7 @@
         </el-container>
 
         <!-- Rule Editor Dialog -->
-        <el-dialog v-model="editorVisible" title="编辑规则" :fullscreen="isMobile" width="90%" style="max-width: 800px;">
+        <el-dialog v-model="editorVisible" title="编辑规则" width="90%" style="max-width: 800px;">
             <el-form :model="editingRule" label-width="100px">
                 <el-tabs v-model="editorTab">
                     <el-tab-pane label="基本信息" name="basic">
@@ -554,7 +468,6 @@
                 const loading = ref(false);
                 const currentView = ref('1');
                 const drawerVisible = ref(false);
-                const isMobile = ref(window.innerWidth < 768);
                 
                 const config = reactive({
                     default_backend: '',
@@ -802,14 +715,11 @@
 
                 onMounted(() => {
                     checkAuth();
-                    window.addEventListener('resize', () => {
-                        isMobile.value = window.innerWidth < 768;
-                    });
                 });
 
                 return {
                     isAuthenticated, password, loading, login, logout,
-                    currentView, drawerVisible, isMobile, handleMenuSelect,
+                    currentView, drawerVisible, handleMenuSelect,
                     config, syncStatus, syncStatusMessages, fetchConfig,
                     saveDefaultBackend, saveRules,
                     jsonMode, rulesJson, editorVisible, editorTab, editingRule, openRuleEditor, confirmEditRule, deleteRule,
