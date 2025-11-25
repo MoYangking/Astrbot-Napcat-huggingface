@@ -1,6 +1,8 @@
 FROM ubuntu:latest
 
-ARG APT_MIRROR=http://mirrors.aliyun.com/ubuntu
+# Default APT mirror tuned for GitHub Actions（北美）：azure.archive
+# 可按需覆盖：edge.kernel.org、mirror.rackspace.com 等
+ARG APT_MIRROR=http://azure.archive.ubuntu.com/ubuntu
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Etc/UTC
 
