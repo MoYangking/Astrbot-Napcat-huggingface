@@ -11,8 +11,6 @@ export XDG_CONFIG_HOME="/app/.config"
 mkdir -p /app/.config/QQ /app/napcat/config || true
 
 NAPCAT_SOCKS5="${NAPCAT_SOCKS5:-}"
-NAPCAT_SOCKS5_USER="${NAPCAT_SOCKS5_USER:-}"
-NAPCAT_SOCKS5_PASS="${NAPCAT_SOCKS5_PASS:-}"
 NAPCAT_PROXYCHAINS_CONF="${NAPCAT_PROXYCHAINS_CONF:-/home/user/.proxychains.conf}"
 
 NAPCAT_FLAGS_ARRAY=()
@@ -28,14 +26,6 @@ if [[ -n "${NAPCAT_SOCKS5}" ]]; then
     PROXY_ADDR="${PROXY_ADDR/:/ }"
   fi
 
-  read -r PROXY_HOST PROXY_PORT <<<"$PROXY_ADDR"
-
-  PROXY_LINE="socks5 "
-  if [[ -n "$NAPCAT_SOCKS5_USER" ]]; then
-    PROXY_LINE+="$NAPCAT_SOCKS5_USER ${NAPCAT_SOCKS5_PASS:-} "
-  fi
-  PROXY_LINE+="$PROXY_HOST $PROXY_PORT"
-
   mkdir -p "$(dirname "$NAPCAT_PROXYCHAINS_CONF")"
   cat > "$NAPCAT_PROXYCHAINS_CONF" <<EOF
 strict_chain
@@ -45,7 +35,7 @@ tcp_read_time_out 15000
 tcp_connect_time_out 8000
 
 [ProxyList]
-$PROXY_LINE
+socks5 ${PROXY_ADDR}
 EOF
   PROXY_PREFIX=(proxychains4 -f "$NAPCAT_PROXYCHAINS_CONF")
 fi
