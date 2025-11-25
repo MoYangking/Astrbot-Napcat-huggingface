@@ -26,16 +26,26 @@ if [ -n "${QQ_SOCKS5_HOST:-}" ] && [ -n "${QQ_SOCKS5_PORT:-}" ]; then
     fi
   fi
 
-  export SOCKS_SERVER="${socks_host}:${socks_port}"
-  export SOCKS_VERSION=5
-  if [ -n "${QQ_SOCKS5_USER:-}" ]; then
-    export SOCKS5_USER="${QQ_SOCKS5_USER}"
-  fi
-  if [ -n "${QQ_SOCKS5_PASS:-}" ]; then
-    export SOCKS5_PASS="${QQ_SOCKS5_PASS}"
+  # Start a local unauthenticated SOCKS5 via gost to bridge upstream with auth
+  gost_port="${GOST_LOCAL_SOCKS_PORT:-1081}"
+  upstream="socks5://${socks_host}:${socks_port}"
+  if [ -n "${QQ_SOCKS5_USER:-}" ] || [ -n "${QQ_SOCKS5_PASS:-}" ]; then
+    upstream="socks5://${QQ_SOCKS5_USER:-}:${QQ_SOCKS5_PASS:-}@${socks_host}:${socks_port}"
   fi
 
-  echo "Using SOCKS5 via ${socks_host}:${socks_port} for QQ (dante socksify)"
+  if [ -x /home/user/gost ]; then
+    mkdir -p /home/user/logs
+    (/home/user/gost -L "socks5://:${gost_port}" -F "${upstream}" >/home/user/logs/gost.log 2>&1 &)
+    sleep 1
+  else
+    echo "WARN: /home/user/gost not found, skipping gost bridge" >&2
+  fi
+
+  export SOCKS_SERVER="127.0.0.1:${gost_port}"
+  export SOCKS_VERSION=5
+  export SOCKS_RESOLVE=remote  # resolve via proxy to avoid 本地DNS泄露
+
+  echo "Using SOCKS5 via ${socks_host}:${socks_port} for QQ (gost bridge -> socksify)"
   dante_cmd=(socksify)
 fi
 
