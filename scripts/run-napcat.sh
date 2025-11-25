@@ -35,7 +35,8 @@ if [ -n "${QQ_SOCKS5_HOST:-}" ] && [ -n "${QQ_SOCKS5_PORT:-}" ]; then
 
   if [ -x /home/user/gost ]; then
     mkdir -p /home/user/logs
-    (/home/user/gost -L "socks5://:${gost_port}" -F "${upstream}" >/home/user/logs/gost.log 2>&1 &)
+    # Enable UDP on both listen and upstream to cover QQ udp associate
+    (/home/user/gost -L "socks5://:${gost_port}?udp=true" -F "${upstream}?udp=true" >/home/user/logs/gost.log 2>&1 &)
     sleep 1
   else
     echo "WARN: /home/user/gost not found, skipping gost bridge" >&2
