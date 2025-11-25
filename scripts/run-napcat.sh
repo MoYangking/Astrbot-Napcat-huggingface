@@ -14,6 +14,19 @@ PROXYCHAINS_CONF="/home/user/proxychains.conf"
 proxy_cmd=()
 
 if [ -n "${QQ_SOCKS5_HOST:-}" ] && [ -n "${QQ_SOCKS5_PORT:-}" ]; then
+  proxy_host="${QQ_SOCKS5_HOST}"
+  proxy_port="${QQ_SOCKS5_PORT}"
+
+  # Strip accidental ":port" from host if present (common when host already includes port)
+  if [[ "$proxy_host" == *:* ]]; then
+    last_part="${proxy_host##*:}"
+    host_part="${proxy_host%:*}"
+    if [[ "$last_part" =~ ^[0-9]+$ ]]; then
+      proxy_host="$host_part"
+      [ -z "$proxy_port" ] && proxy_port="$last_part"
+    fi
+  fi
+
   mkdir -p "$(dirname "$PROXYCHAINS_CONF")"
   cat > "$PROXYCHAINS_CONF" <<EOF
 strict_chain
@@ -26,12 +39,12 @@ tcp_connect_time_out 8000
 EOF
 
   if [ -n "${QQ_SOCKS5_USER:-}" ] && [ -n "${QQ_SOCKS5_PASS:-}" ]; then
-    echo "socks5 ${QQ_SOCKS5_USER} ${QQ_SOCKS5_PASS} ${QQ_SOCKS5_HOST} ${QQ_SOCKS5_PORT}" >> "$PROXYCHAINS_CONF"
+    echo "socks5 ${proxy_host} ${proxy_port} ${QQ_SOCKS5_USER} ${QQ_SOCKS5_PASS}" >> "$PROXYCHAINS_CONF"
   else
-    echo "socks5 ${QQ_SOCKS5_HOST} ${QQ_SOCKS5_PORT}" >> "$PROXYCHAINS_CONF"
+    echo "socks5 ${proxy_host} ${proxy_port}" >> "$PROXYCHAINS_CONF"
   fi
 
-  echo "Using SOCKS5 via ${QQ_SOCKS5_HOST}:${QQ_SOCKS5_PORT} for QQ"
+  echo "Using SOCKS5 via ${proxy_host}:${proxy_port} for QQ"
   proxy_cmd=(proxychains4 -f "$PROXYCHAINS_CONF")
 fi
 
