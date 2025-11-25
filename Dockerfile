@@ -1,10 +1,16 @@
 FROM ubuntu:latest
 
+ARG APT_MIRROR=http://mirrors.aliyun.com/ubuntu
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Etc/UTC
 
-# Faster APT mirrors (default archive/security -> Aliyun)
-RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list
+# Faster APT mirrors (default archive/security -> configurable mirror)
+RUN set -eux; \
+    mirror="${APT_MIRROR%/}"; \
+    sed -i "s|http://archive.ubuntu.com/ubuntu|${mirror}|g; s|http://security.ubuntu.com/ubuntu|${mirror}|g" /etc/apt/sources.list; \
+    if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
+      sed -i "s|http://archive.ubuntu.com/ubuntu|${mirror}|g; s|http://security.ubuntu.com/ubuntu|${mirror}|g" /etc/apt/sources.list.d/ubuntu.sources; \
+    fi
 
 # Base dependencies: git/python/node/build tools + ffmpeg + supervisor + NapCat runtime libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
