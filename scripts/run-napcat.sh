@@ -49,17 +49,10 @@ EOF
   PROXY_PREFIX=(proxychains4 -f "$NAPCAT_PROXYCHAINS_CONF")
 fi
 
-NAPCAT_USE_APPIMAGE="${NAPCAT_USE_APPIMAGE:-}"
-if [[ -x /home/user/napcat/AppRun && -z "$NAPCAT_USE_APPIMAGE" ]]; then
-  # 优先使用已解压的 AppRun，避免 --appimage-extract-and-run 在 /tmp 下生成临时路径导致缺少 major.node 等文件
-  TARGET=(/home/user/napcat/AppRun)
-elif [[ -x /home/user/QQ.AppImage ]]; then
+if [ -x /home/user/QQ.AppImage ]; then
   TARGET=(/home/user/QQ.AppImage --appimage-extract-and-run)
-elif [[ -x /home/user/napcat/AppRun ]]; then
-  TARGET=(/home/user/napcat/AppRun)
 else
-  echo "NapCat 可执行文件未找到" >&2
-  exit 1
+  TARGET=(/home/user/napcat/AppRun)
 fi
 
 if ((${#PROXY_PREFIX[@]})); then
