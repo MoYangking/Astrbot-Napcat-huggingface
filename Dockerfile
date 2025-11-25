@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git jq rsync \
     python3 python3-pip python3-dev python3-venv \
     build-essential libffi-dev libssl-dev \
-    proxychains4 \
+    dante-client \
     ffmpeg \
     supervisor nginx-full \
     xvfb libfuse2t64 \

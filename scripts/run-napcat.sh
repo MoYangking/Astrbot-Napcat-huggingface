@@ -10,48 +10,39 @@ export HOME="/app"
 export XDG_CONFIG_HOME="/app/.config"
 mkdir -p /app/.config/QQ /app/napcat/config || true
 
-PROXYCHAINS_CONF="/home/user/proxychains.conf"
-proxy_cmd=()
+dante_cmd=()
 
 if [ -n "${QQ_SOCKS5_HOST:-}" ] && [ -n "${QQ_SOCKS5_PORT:-}" ]; then
-  proxy_host="${QQ_SOCKS5_HOST}"
-  proxy_port="${QQ_SOCKS5_PORT}"
+  socks_host="${QQ_SOCKS5_HOST}"
+  socks_port="${QQ_SOCKS5_PORT}"
 
-  # Strip accidental ":port" from host if present (common when host already includes port)
-  if [[ "$proxy_host" == *:* ]]; then
-    last_part="${proxy_host##*:}"
-    host_part="${proxy_host%:*}"
+  # Strip accidental ":port" from host if present (e.g., 1.2.3.4:1080 + PORT=1080)
+  if [[ "$socks_host" == *:* ]]; then
+    last_part="${socks_host##*:}"
+    host_part="${socks_host%:*}"
     if [[ "$last_part" =~ ^[0-9]+$ ]]; then
-      proxy_host="$host_part"
-      [ -z "$proxy_port" ] && proxy_port="$last_part"
+      socks_host="$host_part"
+      [ -z "$socks_port" ] && socks_port="$last_part"
     fi
   fi
 
-  mkdir -p "$(dirname "$PROXYCHAINS_CONF")"
-  cat > "$PROXYCHAINS_CONF" <<EOF
-strict_chain
-proxy_dns
-remote_dns_subnet 224
-tcp_read_time_out 15000
-tcp_connect_time_out 8000
-
-[ProxyList]
-EOF
-
-  if [ -n "${QQ_SOCKS5_USER:-}" ] && [ -n "${QQ_SOCKS5_PASS:-}" ]; then
-    echo "socks5 ${proxy_host} ${proxy_port} ${QQ_SOCKS5_USER} ${QQ_SOCKS5_PASS}" >> "$PROXYCHAINS_CONF"
-  else
-    echo "socks5 ${proxy_host} ${proxy_port}" >> "$PROXYCHAINS_CONF"
+  export SOCKS_SERVER="${socks_host}:${socks_port}"
+  export SOCKS_VERSION=5
+  if [ -n "${QQ_SOCKS5_USER:-}" ]; then
+    export SOCKS5_USER="${QQ_SOCKS5_USER}"
+  fi
+  if [ -n "${QQ_SOCKS5_PASS:-}" ]; then
+    export SOCKS5_PASS="${QQ_SOCKS5_PASS}"
   fi
 
-  echo "Using SOCKS5 via ${proxy_host}:${proxy_port} for QQ"
-  proxy_cmd=(proxychains4 -f "$PROXYCHAINS_CONF")
+  echo "Using SOCKS5 via ${socks_host}:${socks_port} for QQ (dante socksify)"
+  dante_cmd=(socksify)
 fi
 
 # Try AppImage extract-and-run first for correct runtime env
 if [ -x /home/user/QQ.AppImage ]; then
-  exec "${proxy_cmd[@]}" /home/user/QQ.AppImage --appimage-extract-and-run ${NAPCAT_FLAGS:-}
+  exec "${dante_cmd[@]}" /home/user/QQ.AppImage --appimage-extract-and-run ${NAPCAT_FLAGS:-}
 fi
 
 # Fallback to extracted AppRun
-exec "${proxy_cmd[@]}" /home/user/napcat/AppRun ${NAPCAT_FLAGS:-}
+exec "${dante_cmd[@]}" /home/user/napcat/AppRun ${NAPCAT_FLAGS:-}
