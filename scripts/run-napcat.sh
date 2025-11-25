@@ -42,12 +42,19 @@ if [ -n "${QQ_SOCKS5_HOST:-}" ] && [ -n "${QQ_SOCKS5_PORT:-}" ]; then
     echo "WARN: /home/user/gost not found, skipping gost bridge" >&2
   fi
 
-  export SOCKS_SERVER="127.0.0.1:${gost_port}"
-  export SOCKS_VERSION=5
-  export SOCKS_RESOLVE=remote  # resolve via proxy to avoid 本地DNS泄露
+  # Generate dante-client config and use SOCKS_CONF=/home/user/.dante.conf socksify ...
+  cat >/home/user/.dante.conf <<EOF
+route {
+  from: 0.0.0.0/0 to: 0.0.0.0/0
+  via: 127.0.0.1 port = ${gost_port}
+  proxyprotocol: socks_v5
+  protocol: tcp udp
+  method: none
+}
+EOF
 
-  echo "Using SOCKS5 via ${socks_host}:${socks_port} for QQ (gost bridge -> socksify)"
-  dante_cmd=(socksify)
+  echo "Using SOCKS5 via ${socks_host}:${socks_port} for QQ (gost bridge -> SOCKS_CONF=/home/user/.dante.conf socksify)"
+  dante_cmd=(env SOCKS_CONF=/home/user/.dante.conf socksify)
 fi
 
 # Try AppImage extract-and-run first for correct runtime env
