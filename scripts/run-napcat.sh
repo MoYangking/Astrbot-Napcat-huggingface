@@ -10,44 +10,10 @@ export HOME="/app"
 export XDG_CONFIG_HOME="/app/.config"
 mkdir -p /app/.config/QQ /app/napcat/config || true
 
-NAPCAT_SOCKS5="${NAPCAT_SOCKS5:-}"
-NAPCAT_PROXYCHAINS_CONF="${NAPCAT_PROXYCHAINS_CONF:-/home/user/.proxychains.conf}"
-
-NAPCAT_FLAGS_ARRAY=()
-if [[ -n "${NAPCAT_FLAGS:-}" ]]; then
-  # shellcheck disable=SC2206
-  NAPCAT_FLAGS_ARRAY=(${NAPCAT_FLAGS})
-fi
-
-PROXY_PREFIX=()
-if [[ -n "${NAPCAT_SOCKS5}" ]]; then
-  PROXY_ADDR="$NAPCAT_SOCKS5"
-  if [[ "$PROXY_ADDR" != *" "* && "$PROXY_ADDR" == *:* ]]; then
-    PROXY_ADDR="${PROXY_ADDR/:/ }"
-  fi
-
-  mkdir -p "$(dirname "$NAPCAT_PROXYCHAINS_CONF")"
-  cat > "$NAPCAT_PROXYCHAINS_CONF" <<EOF
-strict_chain
-proxy_dns
-remote_dns_subnet 224
-tcp_read_time_out 15000
-tcp_connect_time_out 8000
-
-[ProxyList]
-socks5 ${PROXY_ADDR}
-EOF
-  PROXY_PREFIX=(proxychains4 -f "$NAPCAT_PROXYCHAINS_CONF")
-fi
-
+# Try AppImage extract-and-run first for correct runtime env
 if [ -x /home/user/QQ.AppImage ]; then
-  TARGET=(/home/user/QQ.AppImage --appimage-extract-and-run)
-else
-  TARGET=(/home/user/napcat/AppRun)
+  exec /home/user/QQ.AppImage --appimage-extract-and-run ${NAPCAT_FLAGS:-}
 fi
 
-if ((${#PROXY_PREFIX[@]})); then
-  exec "${PROXY_PREFIX[@]}" "${TARGET[@]}" "${NAPCAT_FLAGS_ARRAY[@]}"
-else
-  exec "${TARGET[@]}" "${NAPCAT_FLAGS_ARRAY[@]}"
-fi
+# Fallback to extracted AppRun
+exec /home/user/napcat/AppRun ${NAPCAT_FLAGS:-}
