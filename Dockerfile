@@ -3,6 +3,9 @@ FROM ubuntu:latest
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Etc/UTC
 
+# Faster APT mirrors (default archive/security -> Aliyun)
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list
+
 # Base dependencies: git/python/node/build tools + ffmpeg + supervisor + NapCat runtime libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg bash \
