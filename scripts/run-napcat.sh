@@ -11,7 +11,13 @@ export XDG_CONFIG_HOME="/app/.config"
 mkdir -p /app/.config/QQ /app/napcat/config || true
 
 PROXY_STATE_FILE="/home/user/.astrbot-backup/napcat-proxy.json"
+PROXYCHAINS_CONF="/home/user/proxychains.conf"
 DEFAULT_PROXY="${NAPCAT_PROXY_DEFAULT:-on}"
+
+# Gost local proxy port (used when auth is needed)
+GOST_LOCAL_PORT="${GOST_LOCAL_PORT:-11080}"
+GOST_BIN="/home/user/gost"
+GOST_PID_FILE="/tmp/gost-napcat.pid"
 
 normalize_bool() {
   local v="${1:-}"
@@ -33,13 +39,6 @@ should_enable_proxy() {
   if normalize_bool "$val"; then return 0; else return 1; fi
 }
 
-read -r -a EXTRA_FLAGS <<< "${NAPCAT_FLAGS:-}"
-
-# Gost local proxy port
-GOST_LOCAL_PORT="${GOST_LOCAL_PORT:-11080}"
-GOST_BIN="/home/user/gost"
-GOST_PID_FILE="/tmp/gost-napcat.pid"
-
 # Cleanup gost on exit
 cleanup_gost() {
   if [[ -f "$GOST_PID_FILE" ]]; then
@@ -49,11 +48,33 @@ cleanup_gost() {
 }
 trap cleanup_gost EXIT
 
-# Build proxy argument for Electron (use native --proxy-server instead of proxychains)
-# proxychains uses LD_PRELOAD which conflicts with Electron's sandbox/zygote mechanism
-PROXY_ARG=""
+# Write proxychains config
+write_proxychains_conf() {
+  local host="$1"
+  local port="$2"
+  cat > "$PROXYCHAINS_CONF" <<EOF
+strict_chain
+proxy_dns
+tcp_read_time_out 15000
+tcp_connect_time_out 8000
+
+[ProxyList]
+socks5 ${host} ${port}
+EOF
+  chmod 644 "$PROXYCHAINS_CONF" || true
+}
+
+read -r -a EXTRA_FLAGS <<< "${NAPCAT_FLAGS:-}"
+
+# Determine proxy mode
+USE_PROXY=false
+PROXY_HOST=""
+PROXY_PORT=""
+
 if should_enable_proxy; then
   if [[ -n "${PROXY_SOCKS5_HOST:-}" && -n "${PROXY_SOCKS5_PORT:-}" ]]; then
+    USE_PROXY=true
+    
     # If authentication is needed, use gost as local forwarder
     if [[ -n "${PROXY_SOCKS5_USER:-}" ]]; then
       echo "[napcat] starting gost forwarder for authenticated proxy..."
@@ -61,12 +82,12 @@ if should_enable_proxy; then
       "$GOST_BIN" -L "socks5://:${GOST_LOCAL_PORT}" -F "$UPSTREAM" &
       echo $! > "$GOST_PID_FILE"
       sleep 1  # Wait for gost to start
-      PROXY_ARG="--proxy-server=socks5://127.0.0.1:${GOST_LOCAL_PORT}"
-      echo "[napcat] launching with SOCKS5 proxy via gost -> ${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
+      PROXY_HOST="127.0.0.1"
+      PROXY_PORT="$GOST_LOCAL_PORT"
+      echo "[napcat] gost forwarding to ${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
     else
-      # No auth, direct connection
-      PROXY_ARG="--proxy-server=socks5://${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
-      echo "[napcat] launching with SOCKS5 proxy ${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
+      PROXY_HOST="${PROXY_SOCKS5_HOST}"
+      PROXY_PORT="${PROXY_SOCKS5_PORT}"
     fi
   else
     echo "[napcat] proxy requested but PROXY_SOCKS5_HOST/PORT missing, skip proxy."
@@ -75,11 +96,19 @@ else
   echo "[napcat] launching without proxy"
 fi
 
+# Build command with --no-sandbox to allow proxychains to work
+# (proxychains uses LD_PRELOAD which conflicts with Electron's sandbox/zygote)
 NAPCAT_CMD=()
 if [[ -x /home/user/QQ.AppImage ]]; then
-  NAPCAT_CMD=(/home/user/QQ.AppImage --appimage-extract-and-run ${PROXY_ARG} "${EXTRA_FLAGS[@]}")
+  NAPCAT_CMD=(/home/user/QQ.AppImage --appimage-extract-and-run --no-sandbox "${EXTRA_FLAGS[@]}")
 else
-  NAPCAT_CMD=(/home/user/napcat/AppRun ${PROXY_ARG} "${EXTRA_FLAGS[@]}")
+  NAPCAT_CMD=(/home/user/napcat/AppRun --no-sandbox "${EXTRA_FLAGS[@]}")
+fi
+
+if [[ "$USE_PROXY" == "true" ]]; then
+  write_proxychains_conf "$PROXY_HOST" "$PROXY_PORT"
+  echo "[napcat] launching with SOCKS5 proxy ${PROXY_HOST}:${PROXY_PORT}"
+  exec proxychains4 -q -f "$PROXYCHAINS_CONF" "${NAPCAT_CMD[@]}"
 fi
 
 exec "${NAPCAT_CMD[@]}"
