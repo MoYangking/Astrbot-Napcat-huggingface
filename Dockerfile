@@ -127,17 +127,6 @@ RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releas
     chown 1000:1000 /home/user/gotty && \
     rm -f /tmp/gotty.tar.gz
 
-# Download and install graftcp (SOCKS5 proxy via ptrace)
-RUN LATEST_URL=$(curl -sL https://api.github.com/repos/hmgle/graftcp/releases/latest | \
-    jq -r '.assets[] | select(.name | test("graftcp.*linux.*amd64.*\\.tar\\.gz$")) | .browser_download_url' | head -1) && \
-    curl -L -o /tmp/graftcp.tar.gz "$LATEST_URL" && \
-    tar -xzf /tmp/graftcp.tar.gz -C /tmp && \
-    mv /tmp/graftcp-*/graftcp /home/user/graftcp && \
-    mv /tmp/graftcp-*/graftcp-local /home/user/graftcp-local && \
-    chmod +x /home/user/graftcp /home/user/graftcp-local && \
-    chown 1000:1000 /home/user/graftcp /home/user/graftcp-local && \
-    rm -rf /tmp/graftcp.tar.gz /tmp/graftcp-*
-
 
 
 # Supervisor and Nginx config + logs
