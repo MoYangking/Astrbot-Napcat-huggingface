@@ -127,6 +127,15 @@ RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releas
     chown 1000:1000 /home/user/gotty && \
     rm -f /tmp/gotty.tar.gz
 
+# Download and install gost (proxy forwarder for NapCat)
+RUN LATEST_URL=$(curl -sL https://api.github.com/repos/ginuerzh/gost/releases/latest | \
+    jq -r '.assets[] | select(.name | test("gost-linux-amd64")) | .browser_download_url') && \
+    curl -L -o /tmp/gost.gz "$LATEST_URL" && \
+    gunzip /tmp/gost.gz && \
+    mv /tmp/gost /home/user/gost && \
+    chmod +x /home/user/gost && \
+    chown 1000:1000 /home/user/gost
+
 
 # Supervisor and Nginx config + logs
 RUN mkdir -p /home/user/logs && chown -R 1000:1000 /home/user/logs
@@ -161,6 +170,13 @@ RUN chmod +x /home/user/scripts/wait-for-sync.sh
 ENV DISPLAY=:1 \
     LIBGL_ALWAYS_SOFTWARE=1 \
     NAPCAT_FLAGS=""
+
+# Optional: SOCKS5 proxy for NapCat (QQ login)
+# Set these to enable proxy: PROXY_SOCKS5_HOST, PROXY_SOCKS5_PORT, PROXY_SOCKS5_USER, PROXY_SOCKS5_PASS
+ENV PROXY_SOCKS5_HOST="" \
+    PROXY_SOCKS5_PORT="" \
+    PROXY_SOCKS5_USER="" \
+    PROXY_SOCKS5_PASS=""
 
 # Optional: admin token for updating routes at runtime (used by Lua)
 ENV ROUTE_ADMIN_TOKEN=""
