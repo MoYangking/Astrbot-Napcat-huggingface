@@ -35,19 +35,10 @@ NapCat（可选）
 
 | 名称 | 必填 | 默认值 | 参考值 | 说明 |
 | --- | --- | --- | --- | --- |
-| `NAPCAT_FLAGS` | 否 | 空 | `--disable-gpu` | 传给 QQ AppImage 的额外参数。以非 root 运行,一般无需 `--no-sandbox`。 |
+| `NAPCAT_FLAGS` | 否 | 空 | `--disable-gpu` | 传给 QQ AppImage 的额外参数。以非 root 运行，一般无需 `--no-sandbox`。 |
 | `TZ` | 否 | `Asia/Shanghai` | `Asia/Shanghai` | 时区。 |
 
-SOCKS5 代理配置（可选,用于服务器环境QQ登录）
-
-| 名称 | 必填 | 默认值 | 参考值 | 说明 |
-| --- | --- | --- | --- | --- |
-| `PROXY_SOCKS5_HOST` | 否 | 空 | `163.123.203.225` | SOCKS5 代理主机地址。配置后将在Git同步完成后自动启用。 |
-| `PROXY_SOCKS5_PORT` | 否 | 空 | `8328` | SOCKS5 代理端口。 |
-| `PROXY_SOCKS5_USER` | 否 | 空 | `username` | SOCKS5 代理用户名（如果需要认证）。 |
-| `PROXY_SOCKS5_PASS` | 否 | 空 | `password` | SOCKS5 代理密码（如果需要认证）。 |
-
-Gemini Balance（使用 Gemini 代理时建议配置,可通过环境变量或 `.env` 文件）
+Gemini Balance（使用 Gemini 代理时建议配置，可通过环境变量或 `.env` 文件）
 
 | 名称 | 必填 | 默认值 | 参考值 | 说明/如何获取 |
 | --- | --- | --- | --- | --- |
@@ -94,49 +85,16 @@ docker run -d \
 2）推送本仓库到 Space（或连接 GitHub）。
 3）在 Settings → Variables and secrets 配置：
 - 若使用 Gemini：`API_KEYS`、`ALLOWED_TOKENS`、`AUTH_TOKEN` 等。
-- 若需要代理：`PROXY_SOCKS5_HOST`、`PROXY_SOCKS5_PORT`、`PROXY_SOCKS5_USER`、`PROXY_SOCKS5_PASS`。
 - 可选：`NAPCAT_FLAGS`（如 `--disable-gpu`）。
-4）硬件：CPU Basic 即可；如需常驻在线,关闭自动休眠。
-5）启动 Space,等待构建完成,访问 Space URL（内部监听 7860）。
+4）硬件：CPU Basic 即可；如需常驻在线，关闭自动休眠。
+5）启动 Space，等待构建完成，访问 Space URL（内部监听 7860）。
 6）首次建议：
 - 打开 `/admin/ui/` 修改路由管理密码。
 - AstrBot：在控制台配置模型与平台。
 - NapCat：在 `/webui/` 完成登录与绑定。
-- Gemini：提供 `API_KEYS` 等变量或 `.env`,并测试接口。
-- **代理控制**：访问 `/sync` 界面,选择"代理控制"菜单查看代理状态,可随时启动/停止代理。
+- Gemini：提供 `API_KEYS` 等变量或 `.env`，并测试接口。
 
 参考项目：https://huggingface.co/spaces/MoYang303/astrbot
-
----
-
-## SOCKS5 代理使用指南
-
-### 为什么需要代理？
-在某些服务器环境下（如Hugging Face Spaces、云服务器等）,QQ无法直接登录。使用SOCKS5代理可以解决这个问题。
-
-### 配置步骤
-1. **设置环境变量**：在Docker运行时或Hugging Face Spaces设置中配置：
-   ```bash
-   PROXY_SOCKS5_HOST=your_proxy_host
-   PROXY_SOCKS5_PORT=your_proxy_port
-   PROXY_SOCKS5_USER=your_username  # 可选
-   PROXY_SOCKS5_PASS=your_password  # 可选
-   ```
-
-2. **自动启动**：配置环境变量后,代理会在Git同步完成后自动启动,NapCat将通过代理连接。
-
-3. **Web管理界面**：
-   - 访问 `http://your-host:7860/sync`
-   - 点击左侧菜单"代理控制"
-   - 查看当前代理状态（配置状态、启用状态、服务状态）
-   - 点击"停止代理"按钮可关闭代理,QQ将自动重启并使用直连
-   - 点击"启动代理"按钮可重新启用代理,QQ将自动重启并使用代理
-
-### 工作原理
-- 项目使用Gost将SOCKS5代理转换为本地HTTP代理（127.0.0.1:8118）
-- NapCat启动时检查代理状态文件 `/home/user/.proxy-enabled`
-- 如果文件存在,设置 `http_proxy` 和 `https_proxy` 环境变量
-- 启动/停止代理时,NapCat会自动重启以应用新的代理设置
 
 ---
 

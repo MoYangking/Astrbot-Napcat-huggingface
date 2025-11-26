@@ -167,10 +167,6 @@
                             <el-icon><List /></el-icon>
                             <span>Git 日志 & 文件</span>
                         </el-menu-item>
-                        <el-menu-item index="5">
-                            <el-icon><Connection /></el-icon>
-                            <span>代理控制</span>
-                        </el-menu-item>
                     </el-menu>
                 </el-aside>
 
@@ -206,10 +202,6 @@
                         <el-menu-item index="4">
                             <el-icon><List /></el-icon>
                             <span>Git 日志 & 文件</span>
-                        </el-menu-item>
-                        <el-menu-item index="5">
-                            <el-icon><Connection /></el-icon>
-                            <span>代理控制</span>
                         </el-menu-item>
                     </el-menu>
                 </el-drawer>
@@ -478,73 +470,6 @@
                             </el-col>
                         </el-row>
                     </div>
-
-                    <!-- View 5: Proxy Control -->
-                    <div v-if="currentView === '5'">
-                        <el-card class="mb-4">
-                            <template #header>
-                                <div class="card-header">
-                                    <span>代理状态</span>
-                                    <el-button type="primary" link @click="loadProxyStatus"><el-icon><Refresh /></el-icon> 刷新</el-button>
-                                </div>
-                            </template>
-                            <el-descriptions :column="2" border>
-                                <el-descriptions-item label="代理配置">
-                                    <el-tag v-if="proxyStatus.config.configured" type="success">已配置</el-tag>
-                                    <el-tag v-else type="warning">未配置</el-tag>
-                                </el-descriptions-item>
-                                <el-descriptions-item label="代理状态">
-                                    <el-tag v-if="proxyStatus.enabled" type="success">已启用</el-tag>
-                                    <el-tag v-else type="info">已停用</el-tag>
-                                </el-descriptions-item>
-                                <el-descriptions-item label="服务状态">
-                                    <el-tag v-if="proxyStatus.service_status === 'RUNNING'" type="success">运行中</el-tag>
-                                    <el-tag v-else-if="proxyStatus.service_status === 'STOPPED'" type="info">已停止</el-tag>
-                                    <el-tag v-else type="warning">{{ proxyStatus.service_status }}</el-tag>
-                                </el-descriptions-item>
-                                <el-descriptions-item label="代理地址" v-if="proxyStatus.config.host">
-                                    {{ proxyStatus.config.host }}:{{ proxyStatus.config.port }}
-                                </el-descriptions-item>
-                            </el-descriptions>
-                        </el-card>
-
-                        <el-card>
-                            <template #header>
-                                <div class="card-header">
-                                    <span>代理操作</span>
-                                </div>
-                            </template>
-                            <el-alert
-                                title="提示"
-                                type="info"
-                                :closable="false"
-                                class="mb-4"
-                                show-icon>
-                                启动或停止代理后,NapCat (QQ) 服务将自动重启以应用新的代理设置。
-                            </el-alert>
-                            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                                <el-button 
-                                    type="success" 
-                                    @click="startProxy" 
-                                    :loading="loading"
-                                    :disabled="proxyStatus.enabled || !proxyStatus.config.configured">
-                                    <el-icon><Connection /></el-icon> 启动代理
-                                </el-button>
-                                <el-popconfirm 
-                                    title="确定要停止代理吗?QQ将重启并使用直连" 
-                                    @confirm="stopProxy">
-                                    <template #reference>
-                                        <el-button 
-                                            type="danger" 
-                                            :loading="loading"
-                                            :disabled="!proxyStatus.enabled">
-                                            <el-icon><Close /></el-icon> 停止代理
-                                        </el-button>
-                                    </template>
-                                </el-popconfirm>
-                            </div>
-                        </el-card>
-                    </div>
                 </el-main>
             </el-container>
         </el-container>
@@ -598,17 +523,6 @@
                 const gitLogs = ref([]);
                 const repoFiles = ref([]);
 
-                // Proxy Management
-                const proxyStatus = reactive({
-                    enabled: false,
-                    service_status: 'UNKNOWN',
-                    config: {
-                        host: '',
-                        port: '',
-                        configured: false
-                    }
-                });
-
                 const addLog = (msg) => {
                     const time = new Date().toLocaleTimeString();
                     logs.value.push({ time, msg });
@@ -634,8 +548,6 @@
                     } else if (index === '4') {
                         loadGitLogs();
                         loadRepoFiles();
-                    } else if (index === '5') {
-                        loadProxyStatus();
                     }
                 };
 
@@ -807,63 +719,6 @@
                     }
                 };
 
-                // Proxy Functions
-                const loadProxyStatus = async () => {
-                    try {
-                        const res = await fetch('/sync/api/proxy/status');
-                        const data = await res.json();
-                        if (data.ok) {
-                            Object.assign(proxyStatus, data);
-                            addLog('代理状态已更新');
-                        }
-                    } catch (e) {
-                        ElementPlus.ElMessage.error('获取代理状态失败: ' + e.message);
-                        addLog('Error: ' + e.message);
-                    }
-                };
-
-                const startProxy = async () => {
-                    loading.value = true;
-                    addLog('正在启动代理...');
-                    try {
-                        const res = await post('/sync/api/proxy/start');
-                        if (res.ok) {
-                            ElementPlus.ElMessage.success(res.message || '代理已启动');
-                            addLog('代理已启动,QQ正在重启...');
-                            // 等待几秒后刷新状态
-                            setTimeout(loadProxyStatus, 3000);
-                        } else {
-                            throw new Error(res.error || '未知错误');
-                        }
-                    } catch (e) {
-                        ElementPlus.ElMessage.error('启动代理失败: ' + e.message);
-                        addLog('启动代理失败: ' + e.message);
-                    } finally {
-                        loading.value = false;
-                    }
-                };
-
-                const stopProxy = async () => {
-                    loading.value = true;
-                    addLog('正在停止代理...');
-                    try {
-                        const res = await post('/sync/api/proxy/stop');
-                        if (res.ok) {
-                            ElementPlus.ElMessage.success(res.message || '代理已停止');
-                            addLog('代理已停止,QQ正在重启...');
-                            // 等待几秒后刷新状态
-                            setTimeout(loadProxyStatus, 3000);
-                        } else {
-                            throw new Error(res.error || '未知错误');
-                        }
-                    } catch (e) {
-                        ElementPlus.ElMessage.error('停止代理失败: ' + e.message);
-                        addLog('停止代理失败: ' + e.message);
-                    } finally {
-                        loading.value = false;
-                    }
-                };
-
                 onMounted(() => {
                     loadStatus();
                 });
@@ -882,7 +737,6 @@
                     lfsScanResult,
                     gitLogs,
                     repoFiles,
-                    proxyStatus,
                     handleMenuSelect,
                     loadStatus,
                     doAction,
@@ -896,9 +750,6 @@
                     lfsList,
                     loadGitLogs,
                     loadRepoFiles,
-                    loadProxyStatus,
-                    startProxy,
-                    stopProxy,
                     shortHash
                 };
             }

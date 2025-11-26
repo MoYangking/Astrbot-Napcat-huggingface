@@ -179,42 +179,8 @@ class SyncDaemon:
                 f.write(str(int(time.time())))
             log("✓ Sync completed, other services can start")
             self.write_progress({"stage": "complete", "progress": 100})
-            
-            # 自动启动代理服务（如果配置了代理）
-            self._auto_start_proxy()
-            
         except Exception as e:
             err(f"Failed to mark sync complete: {e}")
-    
-    def _auto_start_proxy(self) -> None:
-        """如果配置了代理，自动启动代理服务"""
-        proxy_host = os.environ.get("PROXY_SOCKS5_HOST", "")
-        if not proxy_host:
-            log("No proxy configured, skipping proxy auto-start")
-            return
-        
-        try:
-            log("Starting proxy service automatically...")
-            # 创建代理启用标记文件
-            proxy_enabled_file = "/home/user/.proxy-enabled"
-            with open(proxy_enabled_file, "w") as f:
-                f.write("enabled")
-            log(f"✓ Created proxy enabled marker: {proxy_enabled_file}")
-            
-            # 通过supervisorctl启动proxy服务
-            result = subprocess.run(
-                ["supervisorctl", "-c", "/home/user/supervisord.conf", "start", "proxy"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            if result.returncode == 0 or "already started" in result.stdout.lower():
-                log("✓ Proxy service started successfully")
-            else:
-                err(f"Failed to start proxy service: {result.stderr}")
-        except Exception as e:
-            err(f"Error auto-starting proxy: {e}")
     
     # -------- LFS 恢复 --------
     def restore_lfs_files(self) -> None:
