@@ -161,9 +161,11 @@ RUN mkdir -p /home/user/scripts && chown -R 1000:1000 /home/user/scripts
 COPY --chown=1000:1000 scripts/run-napcat.sh /home/user/scripts/run-napcat.sh
 COPY --chown=1000:1000 scripts/wait-sync-ready.sh /home/user/scripts/wait-sync-ready.sh
 COPY --chown=1000:1000 scripts/wait-for-sync.sh /home/user/scripts/wait-for-sync.sh
+COPY --chown=1000:1000 scripts/proxy-manager.py /home/user/scripts/proxy-manager.py
 RUN chmod +x /home/user/scripts/run-napcat.sh
 RUN chmod +x /home/user/scripts/wait-sync-ready.sh
 RUN chmod +x /home/user/scripts/wait-for-sync.sh
+RUN chmod +x /home/user/scripts/proxy-manager.py
 
 # Env and ports
 ENV DISPLAY=:1 \
@@ -175,6 +177,12 @@ ENV ROUTE_ADMIN_TOKEN=""
 
 # Control whether to start Gemini service (default: true)
 ENV ENABLE_GEMINI=true
+
+# SOCKS5 Proxy Configuration (optional, for QQ login in restricted environments)
+ENV PROXY_SOCKS5_HOST="" \
+    PROXY_SOCKS5_PORT="" \
+    PROXY_SOCKS5_USER="" \
+    PROXY_SOCKS5_PASS=""
 
 # Ensure OpenResty binaries present in PATH
 ENV PATH=/usr/local/openresty/bin:$PATH

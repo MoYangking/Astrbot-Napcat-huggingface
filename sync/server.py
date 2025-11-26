@@ -378,6 +378,141 @@ def create_app(daemon=None):
         except Exception as e:
             return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
+    # ======== 代理控制 API ========
+    @app.get("/sync/api/proxy/status")
+    def api_proxy_status():
+        """查询代理状态"""
+        import subprocess
+        
+        try:
+            # 检查代理启用标记
+            proxy_enabled = os.path.exists("/home/user/.proxy-enabled")
+            
+            # 检查代理服务状态
+            result = subprocess.run(
+                ["supervisorctl", "-c", "/home/user/supervisord.conf", "status", "proxy"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            service_status = "UNKNOWN"
+            if result.returncode == 0:
+                parts = result.stdout.strip().split()
+                if len(parts) >= 2:
+                    service_status = parts[1]  # RUNNING, STOPPED, etc.
+            
+            # 获取代理配置
+            proxy_config = {
+                "host": os.environ.get("PROXY_SOCKS5_HOST", ""),
+                "port": os.environ.get("PROXY_SOCKS5_PORT", ""),
+                "configured": bool(os.environ.get("PROXY_SOCKS5_HOST"))
+            }
+            
+            return {
+                "ok": True,
+                "enabled": proxy_enabled,
+                "service_status": service_status,
+                "config": proxy_config
+            }
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    
+    @app.post("/sync/api/proxy/start")
+    def api_proxy_start():
+        """启动代理并重启QQ"""
+        import subprocess
+        
+        try:
+            # 检查是否配置了代理
+            if not os.environ.get("PROXY_SOCKS5_HOST"):
+                return JSONResponse({
+                    "ok": False, 
+                    "error": "Proxy not configured. Please set PROXY_SOCKS5_HOST environment variable."
+                }, status_code=400)
+            
+            # 创建代理启用标记
+            with open("/home/user/.proxy-enabled", "w") as f:
+                f.write("enabled")
+            log("✓ Created proxy enabled marker")
+            
+            # 启动代理服务
+            result = subprocess.run(
+                ["supervisorctl", "-c", "/home/user/supervisord.conf", "start", "proxy"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode != 0 and "already started" not in result.stdout.lower():
+                return JSONResponse({
+                    "ok": False,
+                    "error": f"Failed to start proxy: {result.stderr}"
+                }, status_code=500)
+            
+            # 重启NapCat服务以应用代理
+            result = subprocess.run(
+                ["supervisorctl", "-c", "/home/user/supervisord.conf", "restart", "napcat"],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            
+            if result.returncode != 0:
+                return JSONResponse({
+                    "ok": False,
+                    "error": f"Proxy started but failed to restart NapCat: {result.stderr}"
+                }, status_code=500)
+            
+            log("✓ Proxy started and NapCat restarted")
+            return {"ok": True, "message": "Proxy started and QQ restarted successfully"}
+            
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    
+    @app.post("/sync/api/proxy/stop")
+    def api_proxy_stop():
+        """停止代理并重启QQ"""
+        import subprocess
+        
+        try:
+            # 删除代理启用标记
+            if os.path.exists("/home/user/.proxy-enabled"):
+                os.remove("/home/user/.proxy-enabled")
+                log("✓ Removed proxy enabled marker")
+            
+            # 停止代理服务
+            result = subprocess.run(
+                ["supervisorctl", "-c", "/home/user/supervisord.conf", "stop", "proxy"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode != 0 and "not running" not in result.stdout.lower():
+                log(f"Warning: Failed to stop proxy service: {result.stderr}")
+            
+            # 重启NapCat服务以移除代理
+            result = subprocess.run(
+                ["supervisorctl", "-c", "/home/user/supervisord.conf", "restart", "napcat"],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            
+            if result.returncode != 0:
+                return JSONResponse({
+                    "ok": False,
+                    "error": f"Proxy stopped but failed to restart NapCat: {result.stderr}"
+                }, status_code=500)
+            
+            log("✓ Proxy stopped and NapCat restarted")
+            return {"ok": True, "message": "Proxy stopped and QQ restarted successfully"}
+            
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
     # 静态文件挂载必须在最后，避免拦截 API 路由
     web_dir = os.path.join(os.path.dirname(__file__), "web")
     if os.path.isdir(web_dir):
