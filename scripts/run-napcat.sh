@@ -11,7 +11,6 @@ export XDG_CONFIG_HOME="/app/.config"
 mkdir -p /app/.config/QQ /app/napcat/config || true
 
 PROXY_STATE_FILE="/home/user/.astrbot-backup/napcat-proxy.json"
-PROXYCHAINS_CONF="/home/user/proxychains.conf"
 DEFAULT_PROXY="${NAPCAT_PROXY_DEFAULT:-on}"
 
 normalize_bool() {
@@ -34,42 +33,53 @@ should_enable_proxy() {
   if normalize_bool "$val"; then return 0; else return 1; fi
 }
 
-ensure_proxy_conf() {
-  if [[ -z "${PROXY_SOCKS5_HOST:-}" || -z "${PROXY_SOCKS5_PORT:-}" ]]; then
-    echo "[napcat] proxy requested but PROXY_SOCKS5_HOST/PORT missing, skip proxy."
-    return 1
-  fi
-  local auth=""
-  if [[ -n "${PROXY_SOCKS5_USER:-}" ]]; then
-    auth=" ${PROXY_SOCKS5_USER:-} ${PROXY_SOCKS5_PASS:-}"
-  fi
-  cat > "$PROXYCHAINS_CONF" <<EOF
-strict_chain
-proxy_dns
-tcp_read_time_out 15000
-tcp_connect_time_out 8000
-
-[ProxyList]
-socks5 ${PROXY_SOCKS5_HOST} ${PROXY_SOCKS5_PORT}${auth}
-EOF
-  chmod 644 "$PROXYCHAINS_CONF" || true
-  echo "[napcat] proxy config written to ${PROXYCHAINS_CONF}"
-  return 0
-}
-
 read -r -a EXTRA_FLAGS <<< "${NAPCAT_FLAGS:-}"
+
+# Gost local proxy port
+GOST_LOCAL_PORT="${GOST_LOCAL_PORT:-11080}"
+GOST_BIN="/home/user/gost"
+GOST_PID_FILE="/tmp/gost-napcat.pid"
+
+# Cleanup gost on exit
+cleanup_gost() {
+  if [[ -f "$GOST_PID_FILE" ]]; then
+    kill "$(cat "$GOST_PID_FILE")" 2>/dev/null || true
+    rm -f "$GOST_PID_FILE"
+  fi
+}
+trap cleanup_gost EXIT
+
+# Build proxy argument for Electron (use native --proxy-server instead of proxychains)
+# proxychains uses LD_PRELOAD which conflicts with Electron's sandbox/zygote mechanism
+PROXY_ARG=""
+if should_enable_proxy; then
+  if [[ -n "${PROXY_SOCKS5_HOST:-}" && -n "${PROXY_SOCKS5_PORT:-}" ]]; then
+    # If authentication is needed, use gost as local forwarder
+    if [[ -n "${PROXY_SOCKS5_USER:-}" ]]; then
+      echo "[napcat] starting gost forwarder for authenticated proxy..."
+      UPSTREAM="socks5://${PROXY_SOCKS5_USER}:${PROXY_SOCKS5_PASS:-}@${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
+      "$GOST_BIN" -L "socks5://:${GOST_LOCAL_PORT}" -F "$UPSTREAM" &
+      echo $! > "$GOST_PID_FILE"
+      sleep 1  # Wait for gost to start
+      PROXY_ARG="--proxy-server=socks5://127.0.0.1:${GOST_LOCAL_PORT}"
+      echo "[napcat] launching with SOCKS5 proxy via gost -> ${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
+    else
+      # No auth, direct connection
+      PROXY_ARG="--proxy-server=socks5://${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
+      echo "[napcat] launching with SOCKS5 proxy ${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
+    fi
+  else
+    echo "[napcat] proxy requested but PROXY_SOCKS5_HOST/PORT missing, skip proxy."
+  fi
+else
+  echo "[napcat] launching without proxy"
+fi
 
 NAPCAT_CMD=()
 if [[ -x /home/user/QQ.AppImage ]]; then
-  NAPCAT_CMD=(/home/user/QQ.AppImage --appimage-extract-and-run "${EXTRA_FLAGS[@]}")
+  NAPCAT_CMD=(/home/user/QQ.AppImage --appimage-extract-and-run ${PROXY_ARG} "${EXTRA_FLAGS[@]}")
 else
-  NAPCAT_CMD=(/home/user/napcat/AppRun "${EXTRA_FLAGS[@]}")
+  NAPCAT_CMD=(/home/user/napcat/AppRun ${PROXY_ARG} "${EXTRA_FLAGS[@]}")
 fi
 
-if should_enable_proxy && ensure_proxy_conf; then
-  echo "[napcat] launching with SOCKS5 proxy ${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
-  exec proxychains4 -q -f "$PROXYCHAINS_CONF" "${NAPCAT_CMD[@]}"
-fi
-
-echo "[napcat] launching without proxy"
 exec "${NAPCAT_CMD[@]}"
