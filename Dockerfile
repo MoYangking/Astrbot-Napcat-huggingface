@@ -128,7 +128,7 @@ RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releas
     rm -f /tmp/gotty.tar.gz
 
 # Download and install gost (proxy forwarder for NapCat)
-RUN curl -L -o /tmp/gost.gz "https://github.com/ginuerzh/gost/releases/download/v2.12.0/gost-linux-amd64-2.12.0.gz" && \
+RUN curl -L -o /tmp/gost.gz "https://github.com/ginuerzh/gost/releases/download/v2.12.0/gost_2.12.0_linux_amd64.tar.gz" && \
     gunzip /tmp/gost.gz && \
     mv /tmp/gost /home/user/gost && \
     chmod +x /home/user/gost && \
