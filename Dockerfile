@@ -131,11 +131,15 @@ RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releas
     rm -f /tmp/gotty.tar.gz
 
 # Download tun2socks (for SOCKS5 transparent proxy)
+# Use GitHub API if available; fallback to pinned release to avoid build breaks.
 RUN set -eux; \
-    LATEST_URL=$(curl -sL https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest | \
-      awk -F '"' '/browser_download_url/ && /linux-amd64\\.zip/ {print $4; exit}'); \
-    curl -L -o /tmp/tun2socks.zip "$LATEST_URL"; \
-    unzip /tmp/tun2socks.zip -d /tmp/tun2socks; \
+    FALLBACK_URL="https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-linux-amd64.zip"; \
+    LATEST_URL="$(curl -fsSL https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest 2>/dev/null \
+      | jq -r '.assets[]? | select(.name | contains(\"linux-amd64.zip\")) | .browser_download_url' \
+      | head -n1 || true)"; \
+    URL="${LATEST_URL:-$FALLBACK_URL}"; \
+    curl -fL -o /tmp/tun2socks.zip "$URL"; \
+    unzip -q /tmp/tun2socks.zip -d /tmp/tun2socks; \
     install -m 0755 /tmp/tun2socks/tun2socks /home/user/tun2socks; \
     chown 1000:1000 /home/user/tun2socks; \
     rm -rf /tmp/tun2socks /tmp/tun2socks.zip; \
