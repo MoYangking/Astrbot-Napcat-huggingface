@@ -249,6 +249,35 @@
                                 </el-card>
                             </el-col>
                         </el-row>
+                        <el-row :gutter="20">
+                            <el-col :xs="24" :sm="24" :md="12">
+                                <el-card class="mb-4">
+                                    <template #header>
+                                        <div class="card-header">
+                                            <span>NapCat 代理开关</span>
+                                            <el-button type="primary" link size="small" @click="fetchProxyStatus" :loading="proxyStatus.loading">
+                                                <el-icon><Refresh /></el-icon> 刷新
+                                            </el-button>
+                                        </div>
+                                    </template>
+                                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
+                                        <el-switch
+                                            v-model="proxyStatus.enabled"
+                                            :loading="proxyStatus.loading"
+                                            active-text="代理开启"
+                                            inactive-text="代理关闭"
+                                            @change="onProxyToggle">
+                                        </el-switch>
+                                        <el-tag v-if="proxyStatus.host" type="info" effect="dark">
+                                            SOCKS5 {{ proxyStatus.host }}{{ proxyStatus.port ? ':' + proxyStatus.port : '' }}
+                                        </el-tag>
+                                    </div>
+                                    <div style="color: #909399; font-size: 13px;">
+                                        切换后会自动重启 NapCat 进程，等待数秒生效。账号登录阶段建议保持开启。
+                                    </div>
+                                </el-card>
+                            </el-col>
+                        </el-row>
                     </div>
 
                     <!-- View 2: Advanced Rules -->
@@ -478,6 +507,12 @@
                     stage: 'unknown',
                     progress: 0
                 });
+                const proxyStatus = reactive({
+                    enabled: true,
+                    host: '',
+                    port: '',
+                    loading: false
+                });
                 
                 const syncStatusMessages = {
                     'starting': '启动中',
@@ -513,6 +548,7 @@
                         password.value = saved;
                         isAuthenticated.value = true;
                         fetchConfig();
+                        fetchProxyStatus();
                         startSyncPoll();
                     }
                 };
@@ -522,6 +558,7 @@
                         localStorage.setItem('routeAdminPassword', password.value);
                         isAuthenticated.value = true;
                         fetchConfig();
+                        fetchProxyStatus();
                         startSyncPoll();
                     }
                 };
@@ -549,6 +586,27 @@
                         rulesJson.value = JSON.stringify(config.rules, null, 2);
                     } catch (e) {
                         ElementPlus.ElMessage.error('加载配置失败: ' + e.message);
+                    }
+                };
+
+                const fetchProxyStatus = async () => {
+                    if (!isAuthenticated.value) return;
+                    proxyStatus.loading = true;
+                    try {
+                        const res = await fetch('/admin/napcat-proxy', { headers: headers() });
+                        if (res.status === 403) {
+                            ElementPlus.ElMessage.error('密码错误或已过期');
+                            logout();
+                            return;
+                        }
+                        const data = await res.json();
+                        proxyStatus.enabled = !!data.enabled;
+                        proxyStatus.host = data.host || '';
+                        proxyStatus.port = data.port || '';
+                    } catch (e) {
+                        ElementPlus.ElMessage.error('代理状态获取失败: ' + e.message);
+                    } finally {
+                        proxyStatus.loading = false;
                     }
                 };
 
@@ -708,6 +766,33 @@
                     poll();
                 };
 
+                const onProxyToggle = async (val) => {
+                    if (proxyStatus.loading) return;
+                    const prev = proxyStatus.enabled;
+                    proxyStatus.loading = true;
+                    try {
+                        const res = await fetch('/admin/napcat-proxy', {
+                            method: 'POST',
+                            headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+                            body: JSON.stringify({ enabled: val })
+                        });
+                        if (res.status === 403) {
+                            ElementPlus.ElMessage.error('密码错误或已过期');
+                            logout();
+                            return;
+                        }
+                        if (!res.ok) throw new Error(await res.text());
+                        const data = await res.json();
+                        proxyStatus.enabled = !!data.enabled;
+                        ElementPlus.ElMessage.success('代理状态已更新，NapCat 正在重启');
+                    } catch (e) {
+                        proxyStatus.enabled = prev;
+                        ElementPlus.ElMessage.error('切换失败: ' + e.message);
+                    } finally {
+                        proxyStatus.loading = false;
+                    }
+                };
+
                 const handleMenuSelect = (index) => {
                     currentView.value = index;
                     drawerVisible.value = false;
@@ -724,7 +809,8 @@
                     saveDefaultBackend, saveRules,
                     jsonMode, rulesJson, editorVisible, editorTab, editingRule, openRuleEditor, confirmEditRule, deleteRule,
                     testReq, testResult, runTest,
-                    pwdForm, changePassword
+                    pwdForm, changePassword,
+                    proxyStatus, fetchProxyStatus, onProxyToggle
                 };
             }
         });

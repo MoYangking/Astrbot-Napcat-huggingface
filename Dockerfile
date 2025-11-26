@@ -21,7 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev python3-venv \
     build-essential libffi-dev libssl-dev \
     ffmpeg \
-    supervisor nginx-full \
+    supervisor nginx-full proxychains4 \
     xvfb libfuse2t64 \
     libglib2.0-0 libnspr4 libnss3 libatk1.0-0 libatspi2.0-0 \
     libgtk-3-0 libgdk-pixbuf-2.0-0 libpango-1.0-0 libcairo2 \
@@ -168,7 +168,12 @@ RUN chmod +x /home/user/scripts/wait-for-sync.sh
 # Env and ports
 ENV DISPLAY=:1 \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    NAPCAT_FLAGS="" 
+    NAPCAT_FLAGS="" \
+    PROXY_SOCKS5_HOST="163.123.203.225" \
+    PROXY_SOCKS5_PORT="8328" \
+    PROXY_SOCKS5_USER="chskocut" \
+    PROXY_SOCKS5_PASS="lo8hfl2vk6j0" \
+    NAPCAT_PROXY_DEFAULT="on"
 
 # Optional: admin token for updating routes at runtime (used by Lua)
 ENV ROUTE_ADMIN_TOKEN=""
