@@ -127,7 +127,14 @@ RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releas
     chown 1000:1000 /home/user/gotty && \
     rm -f /tmp/gotty.tar.gz
 
-
+# Download and install Gost (SOCKS forwarder)
+RUN set -eux; \
+    GOST_VERSION=2.11.5; \
+    curl -L -o /tmp/gost.gz "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-amd64-${GOST_VERSION}.gz" && \
+    gunzip /tmp/gost.gz && \
+    mv /tmp/gost /home/user/gost && \
+    chmod +x /home/user/gost && \
+    chown 1000:1000 /home/user/gost
 
 # Supervisor and Nginx config + logs
 RUN mkdir -p /home/user/logs && chown -R 1000:1000 /home/user/logs
