@@ -37,8 +37,8 @@ if [ -n "${QQ_SOCKS5_HOST:-}" ] && [ -n "${QQ_SOCKS5_PORT:-}" ]; then
     mkdir -p /home/user/logs
     
     echo "Starting gost bridge..."
-    # 启动 gost (开启详细日志 -V)
-    /home/user/gost -V=2 -L "socks5://:${gost_port}?udp=true" -F "${upstream}?udp=true" >/home/user/logs/gost.log 2>&1 &
+    # 启动 gost
+    /home/user/gost -L "socks5://:${gost_port}?udp=true" -F "${upstream}?udp=true" >/home/user/logs/gost.log 2>&1 &
     gost_pid=$!
 
     echo "Waiting for proxy to be ready on port ${gost_port}..."
@@ -46,11 +46,13 @@ if [ -n "${QQ_SOCKS5_HOST:-}" ] && [ -n "${QQ_SOCKS5_PORT:-}" ]; then
     # 循环检查端口是否开启 (最多等 10 秒)
     proxy_ready=0
     for i in {1..10}; do
+      # 使用 bash 内置 tcp 检测
       if (echo > /dev/tcp/127.0.0.1/${gost_port}) >/dev/null 2>&1; then
         echo "Proxy is ON! (Attempt $i)"
         proxy_ready=1
         break
       fi
+      # 检查进程是否已经挂了
       if ! kill -0 $gost_pid 2>/dev/null; then
         echo "ERROR: Gost process died unexpectedly!"
         break
@@ -58,40 +60,27 @@ if [ -n "${QQ_SOCKS5_HOST:-}" ] && [ -n "${QQ_SOCKS5_PORT:-}" ]; then
       sleep 1
     done
 
-    # 如果代理挂了，打印日志并退出
+    # 如果代理没准备好，打印日志并退出！
     if [ "$proxy_ready" -eq 0 ]; then
       echo "================ GOST ERROR LOG ================"
       cat /home/user/logs/gost.log
       echo "================================================"
+      echo "Fatal Error: Local proxy failed to start. Cannot start QQ."
       exit 1
     fi
 
-    # --- [关键修改] 4. 配置 Dante (更严格的排除规则) ---
+    # --- 4. 配置 Dante ---
     cat >/home/user/.dante.conf <<EOF
 resolveprotocol: fake
 
-# 1. 排除 IPv4 本地回环 (NapCat WebUI/IPC)
+# 直连本地回环，防止 WebUI 报错
 route {
   from: 0.0.0.0/0 to: 127.0.0.0/8
   via: direct
   method: none
 }
 
-# 2. [新增] 排除 IPv6 本地回环 (Node.js 经常用 ::1)
-route {
-  from: 0.0.0.0/0 to: ::1/128
-  via: direct
-  method: none
-}
-
-# 3. [新增] 排除 0.0.0.0 (绑定监听时需要)
-route {
-  from: 0.0.0.0/0 to: 0.0.0.0/32
-  via: direct
-  method: none
-}
-
-# 4. 其他所有流量走 Gost
+# 其他流量走 Gost
 route {
   from: 0.0.0.0/0 to: 0.0.0.0/0
   via: 127.0.0.1 port = ${gost_port}
@@ -101,10 +90,6 @@ route {
 }
 EOF
     echo "Proxy configured successfully."
-    
-    # 开启后台打印 gost 日志，这样如果连接失败你能立刻在控制台看到原因
-    tail -f /home/user/logs/gost.log & 
-
     dante_cmd=(env SOCKS_CONF=/home/user/.dante.conf socksify)
   else
     echo "WARN: gost binary not found. Running DIRECT."
