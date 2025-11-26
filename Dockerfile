@@ -134,9 +134,8 @@ RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releas
 # Use GitHub API if available; fallback to pinned release to avoid build breaks.
 RUN set -eux; \
     FALLBACK_URL="https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-linux-amd64.zip"; \
-    LATEST_URL="$(curl -fsSL https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest 2>/dev/null \
-      | jq -r '.assets[]? | select(.name | contains("linux-amd64.zip")) | .browser_download_url' \
-      | head -n1 || true)"; \
+    LATEST_URL="$(python3 - <<'PY'\nimport json,urllib.request,sys\ntry:\n    data=json.load(urllib.request.urlopen('https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest'))\n    url=next((a['browser_download_url'] for a in data.get('assets',[]) if 'linux-amd64.zip' in a.get('name','')), '')\n    print(url)\nexcept Exception:\n    pass\nPY
+      )"; \
     URL="${LATEST_URL:-$FALLBACK_URL}"; \
     curl -fL -o /tmp/tun2socks.zip "$URL"; \
     unzip -q /tmp/tun2socks.zip -d /tmp/tun2socks; \
