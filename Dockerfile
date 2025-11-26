@@ -20,7 +20,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git jq rsync \
     python3 python3-pip python3-dev python3-venv \
     build-essential libffi-dev libssl-dev \
-    dante-client \
     ffmpeg \
     supervisor nginx-full \
     xvfb libfuse2t64 \
@@ -169,11 +168,7 @@ RUN chmod +x /home/user/scripts/wait-for-sync.sh
 # Env and ports
 ENV DISPLAY=:1 \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    NAPCAT_FLAGS="" \
-    QQ_SOCKS5_HOST="" \
-    QQ_SOCKS5_PORT="" \
-    QQ_SOCKS5_USER="" \
-    QQ_SOCKS5_PASS=""
+    NAPCAT_FLAGS="" 
 
 # Optional: admin token for updating routes at runtime (used by Lua)
 ENV ROUTE_ADMIN_TOKEN=""
