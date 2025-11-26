@@ -42,8 +42,8 @@ EOF
 fi
 
 if [ -x /home/user/QQ.AppImage ]; then
-  exec $PROXY_PREFIX /home/user/QQ.AppImage --appimage-extract-and-run ${NAPCAT_FLAGS:-}
+  exec $PROXY_PREFIX /home/user/QQ.AppImage --appimage-extract-and-run --no-sandbox ${NAPCAT_FLAGS:-}
 fi
 
 # Fallback to extracted AppRun
-exec $PROXY_PREFIX /home/user/napcat/AppRun ${NAPCAT_FLAGS:-}
+exec $PROXY_PREFIX /home/user/napcat/AppRun --no-sandbox ${NAPCAT_FLAGS:-}
