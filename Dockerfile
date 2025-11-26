@@ -1,7 +1,5 @@
 FROM ubuntu:latest
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=Etc/UTC
 # Default APT mirror tuned for GitHub Actions（北美）：azure.archive
 # 可按需覆盖：edge.kernel.org、mirror.rackspace.com 等
 ARG APT_MIRROR=http://azure.archive.ubuntu.com/ubuntu
@@ -15,14 +13,14 @@ RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then \
       sed -i "s|http://archive.ubuntu.com/ubuntu|${mirror}|g; s|http://security.ubuntu.com/ubuntu|${mirror}|g" /etc/apt/sources.list.d/ubuntu.sources; \
     fi
+
 # Base dependencies: git/python/node/build tools + ffmpeg + supervisor + NapCat runtime libs
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl gnupg bash \
     git jq rsync \
-    iproute2 iptables iputils-ping dnsutils procps \
-    unzip \
     python3 python3-pip python3-dev python3-venv \
     build-essential libffi-dev libssl-dev \
+    dante-client \
     ffmpeg \
     supervisor nginx-full \
     xvfb libfuse2t64 \
@@ -130,16 +128,14 @@ RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releas
     chown 1000:1000 /home/user/gotty && \
     rm -f /tmp/gotty.tar.gz
 
-# Download tun2socks (for SOCKS5 transparent proxy)
+# Download and install Gost (SOCKS forwarder)
 RUN set -eux; \
-    LATEST_URL=$(curl -sL https://api.github.com/repos/xjasonlyu/tun2socks/releases/latest | \
-      awk -F '"' '/browser_download_url/ && /linux-amd64\\.zip/ {print $4; exit}'); \
-    curl -L -o /tmp/tun2socks.zip "$LATEST_URL"; \
-    unzip /tmp/tun2socks.zip -d /tmp/tun2socks; \
-    install -m 0755 /tmp/tun2socks/tun2socks /home/user/tun2socks; \
-    chown 1000:1000 /home/user/tun2socks; \
-    rm -rf /tmp/tun2socks /tmp/tun2socks.zip; \
-    mkdir -p /home/user/proxy && chown -R 1000:1000 /home/user/proxy
+    GOST_VERSION=2.11.5; \
+    curl -L -o /tmp/gost.gz "https://github.com/ginuerzh/gost/releases/download/v${GOST_VERSION}/gost-linux-amd64-${GOST_VERSION}.gz" && \
+    gunzip /tmp/gost.gz && \
+    mv /tmp/gost /home/user/gost && \
+    chmod +x /home/user/gost && \
+    chown 1000:1000 /home/user/gost
 
 # Supervisor and Nginx config + logs
 RUN mkdir -p /home/user/logs && chown -R 1000:1000 /home/user/logs
@@ -166,29 +162,18 @@ RUN mkdir -p /home/user/scripts && chown -R 1000:1000 /home/user/scripts
 COPY --chown=1000:1000 scripts/run-napcat.sh /home/user/scripts/run-napcat.sh
 COPY --chown=1000:1000 scripts/wait-sync-ready.sh /home/user/scripts/wait-sync-ready.sh
 COPY --chown=1000:1000 scripts/wait-for-sync.sh /home/user/scripts/wait-for-sync.sh
-COPY --chown=1000:1000 scripts/proxy-tun2socks.sh /home/user/scripts/proxy-tun2socks.sh
 RUN chmod +x /home/user/scripts/run-napcat.sh
 RUN chmod +x /home/user/scripts/wait-sync-ready.sh
 RUN chmod +x /home/user/scripts/wait-for-sync.sh
-RUN chmod +x /home/user/scripts/proxy-tun2socks.sh
 
 # Env and ports
 ENV DISPLAY=:1 \
     LIBGL_ALWAYS_SOFTWARE=1 \
-    NAPCAT_FLAGS=""
-
-# Proxy defaults (tun2socks)
-ENV PROXY_AUTO_ENABLE=false \
-    PROXY_SOCKS5_HOST="" \
-    PROXY_SOCKS5_PORT=1080 \
-    PROXY_SOCKS5_USER="" \
-    PROXY_SOCKS5_PASS="" \
-    PROXY_DNS="" \
-    PROXY_UID=1000 \
-    PROXY_FWMARK=1 \
-    PROXY_TABLE=100 \
-    PROXY_TUN_DEV=tun0 \
-    PROXY_TUN_ADDR=10.10.0.1/24
+    NAPCAT_FLAGS="" \
+    QQ_SOCKS5_HOST="" \
+    QQ_SOCKS5_PORT="" \
+    QQ_SOCKS5_USER="" \
+    QQ_SOCKS5_PASS=""
 
 # Optional: admin token for updating routes at runtime (used by Lua)
 ENV ROUTE_ADMIN_TOKEN=""

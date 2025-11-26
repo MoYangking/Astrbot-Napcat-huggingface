@@ -174,10 +174,6 @@
                             <el-icon><Setting /></el-icon>
                             <span>系统设置</span>
                         </el-menu-item>
-                        <el-menu-item index="5">
-                            <el-icon><Cpu /></el-icon>
-                            <span>代理控制</span>
-                        </el-menu-item>
                     </el-menu>
                 </el-aside>
 
@@ -213,10 +209,6 @@
                         <el-menu-item index="4">
                             <el-icon><Setting /></el-icon>
                             <span>系统设置</span>
-                        </el-menu-item>
-                        <el-menu-item index="5">
-                            <el-icon><Cpu /></el-icon>
-                            <span>代理控制</span>
                         </el-menu-item>
                     </el-menu>
                 </el-drawer>
@@ -395,121 +387,6 @@
                             </el-form>
                         </el-card>
                     </div>
-
-                    <!-- View 5: Proxy Control -->
-                    <div v-if="currentView === '5'">
-                        <el-row :gutter="20">
-                            <el-col :xs="24" :sm="24" :md="12">
-                                <el-card class="mb-4">
-                                    <template #header>
-                                        <div class="card-header">
-                                            <span>代理状态</span>
-                                            <el-button type="primary" link @click="fetchProxyStatus" :loading="proxyStatusLoading">
-                                                <el-icon><Refresh /></el-icon> 刷新
-                                            </el-button>
-                                        </div>
-                                    </template>
-                                    <el-alert title="需要容器有 NET_ADMIN 权限并开放 /dev/net/tun" type="info" :closable="false" show-icon class="mb-4"></el-alert>
-                                    <el-descriptions :column="1" border>
-                                        <el-descriptions-item label="启用">
-                                            <el-tag :type="proxyStatus.enabled ? 'success' : 'info'" effect="dark">
-                                                {{ proxyStatus.enabled ? '已开启' : '关闭' }}
-                                            </el-tag>
-                                        </el-descriptions-item>
-                                        <el-descriptions-item label="运行状态">
-                                            <el-tag :type="proxyStatus.running ? 'success' : 'warning'" effect="dark">
-                                                {{ proxyStatus.running ? '进程运行' : '未运行' }}
-                                            </el-tag>
-                                            <el-tag :type="proxyStatus.tun_up ? 'success' : 'danger'" effect="dark" style="margin-left: 8px;">
-                                                {{ proxyStatus.tun_up ? 'TUN Up' : 'TUN Down' }}
-                                            </el-tag>
-                                        </el-descriptions-item>
-                                        <el-descriptions-item label="路由/标记">
-                                            <el-tag :type="proxyStatus.policy_rule ? 'success' : 'warning'" effect="dark">policy {{ proxyConfig.table }}</el-tag>
-                                            <el-tag type="info" effect="dark" style="margin-left: 8px;">mark {{ proxyConfig.mark }}</el-tag>
-                                            <el-tag :type="proxyStatus.iptables_attached ? 'success' : 'danger'" effect="dark" style="margin-left: 8px;">iptables {{ proxyStatus.iptables_attached ? '挂载' : '未挂载' }}</el-tag>
-                                        </el-descriptions-item>
-                                        <el-descriptions-item label="代理 IP">{{ proxyStatus.proxy_ip || '-' }}</el-descriptions-item>
-                                        <el-descriptions-item label="TUN 设备">{{ proxyConfig.tun_dev }} ({{ proxyConfig.tun_addr }})</el-descriptions-item>
-                                        <el-descriptions-item label="UID 限定">仅 uid {{ proxyConfig.uid }} 走代理</el-descriptions-item>
-                                        <el-descriptions-item label="状态信息">
-                                            <span>{{ proxyStatus.message || '未刷新' }}</span>
-                                            <el-tag v-if="proxyStatus.error" type="danger" effect="dark" style="margin-left: 8px;">{{ proxyStatus.error }}</el-tag>
-                                        </el-descriptions-item>
-                                    </el-descriptions>
-                                </el-card>
-                            </el-col>
-                            <el-col :xs="24" :sm="24" :md="12">
-                                <el-card class="mb-4">
-                                    <template #header>
-                                        <div class="card-header">
-                                            <span>配置 & 控制</span>
-                                            <div style="display: flex; gap: 10px;">
-                                                <el-button type="danger" @click="toggleProxy(false)" :loading="proxyLoading">关闭代理</el-button>
-                                                <el-button type="primary" @click="toggleProxy(true)" :loading="proxyLoading">保存并启用</el-button>
-                                            </div>
-                                        </div>
-                                    </template>
-                                    <el-form label-position="top">
-                                        <el-form-item label="SOCKS5 主机">
-                                            <el-input v-model="proxyConfig.socks_host" placeholder="例如：1.2.3.4 或 proxy.example.com"></el-input>
-                                        </el-form-item>
-                                        <el-form-item label="端口">
-                                            <el-input-number v-model="proxyConfig.socks_port" :min="1" :max="65535" class="w-full"></el-input-number>
-                                        </el-form-item>
-                                        <el-row :gutter="10">
-                                            <el-col :span="12">
-                                                <el-form-item label="用户名（可选）">
-                                                    <el-input v-model="proxyConfig.socks_user"></el-input>
-                                                </el-form-item>
-                                            </el-col>
-                                            <el-col :span="12">
-                                                <el-form-item label="密码（可选）">
-                                                    <el-input v-model="proxyConfig.socks_pass" show-password></el-input>
-                                                </el-form-item>
-                                            </el-col>
-                                        </el-row>
-                                        <el-form-item label="DNS 走代理（可选）">
-                                            <el-input v-model="proxyConfig.dns" placeholder="留空则用本地解析，或填 8.8.8.8:53 / 1.1.1.1:53"></el-input>
-                                        </el-form-item>
-                                        <el-form-item label="自动启用（同步完成后）">
-                                            <el-switch v-model="proxyConfig.auto_enable"></el-switch>
-                                        </el-form-item>
-                                        <el-row :gutter="10">
-                                            <el-col :span="12">
-                                                <el-form-item label="TUN 设备">
-                                                    <el-input v-model="proxyConfig.tun_dev"></el-input>
-                                                </el-form-item>
-                                            </el-col>
-                                            <el-col :span="12">
-                                                <el-form-item label="TUN 地址">
-                                                    <el-input v-model="proxyConfig.tun_addr"></el-input>
-                                                </el-form-item>
-                                            </el-col>
-                                        </el-row>
-                                        <el-row :gutter="10">
-                                            <el-col :span="8">
-                                                <el-form-item label="UID">
-                                                    <el-input-number v-model="proxyConfig.uid" :min="0" :max="65535" class="w-full"></el-input-number>
-                                                </el-form-item>
-                                            </el-col>
-                                            <el-col :span="8">
-                                                <el-form-item label="fwmark">
-                                                    <el-input-number v-model="proxyConfig.mark" :min="1" :max="4096" class="w-full"></el-input-number>
-                                                </el-form-item>
-                                            </el-col>
-                                            <el-col :span="8">
-                                                <el-form-item label="路由表">
-                                                    <el-input-number v-model="proxyConfig.table" :min="1" :max="32765" class="w-full"></el-input-number>
-                                                </el-form-item>
-                                            </el-col>
-                                        </el-row>
-                                        <el-alert type="warning" show-icon :closable="false" title="保存并启用会立刻下发 iptables 和策略路由，并启动 tun2socks。关闭代理会清理规则。"></el-alert>
-                                    </el-form>
-                                </el-card>
-                            </el-col>
-                        </el-row>
-                    </div>
                 </el-main>
             </el-container>
         </el-container>
@@ -596,31 +473,6 @@
                     default_backend: '',
                     rules: []
                 });
-                const proxyConfig = reactive({
-                    socks_host: '',
-                    socks_port: 1080,
-                    socks_user: '',
-                    socks_pass: '',
-                    dns: '',
-                    auto_enable: false,
-                    uid: 1000,
-                    mark: 1,
-                    table: 100,
-                    tun_dev: 'tun0',
-                    tun_addr: '10.10.0.1/24'
-                });
-                const proxyStatus = reactive({
-                    enabled: false,
-                    running: false,
-                    tun_up: false,
-                    iptables_attached: false,
-                    policy_rule: false,
-                    proxy_ip: '',
-                    message: '',
-                    error: ''
-                });
-                const proxyLoading = ref(false);
-                const proxyStatusLoading = ref(false);
                 
                 const syncStatus = reactive({
                     stage: 'unknown',
@@ -661,7 +513,6 @@
                         password.value = saved;
                         isAuthenticated.value = true;
                         fetchConfig();
-                        fetchProxyStatus();
                         startSyncPoll();
                     }
                 };
@@ -671,7 +522,6 @@
                         localStorage.setItem('routeAdminPassword', password.value);
                         isAuthenticated.value = true;
                         fetchConfig();
-                        fetchProxyStatus();
                         startSyncPoll();
                     }
                 };
@@ -767,91 +617,6 @@
                 const deleteRule = (index) => {
                     config.rules.splice(index, 1);
                     rulesJson.value = JSON.stringify(config.rules, null, 2);
-                };
-
-                // Proxy Control
-                const applyProxyConfig = (cfg) => {
-                    if (!cfg) return;
-                    const toNum = (v, fallback) => {
-                        const n = Number(v);
-                        return Number.isFinite(n) ? n : fallback;
-                    };
-                    proxyConfig.socks_host = cfg.socks_host || proxyConfig.socks_host;
-                    proxyConfig.socks_port = toNum(cfg.socks_port, proxyConfig.socks_port);
-                    proxyConfig.socks_user = cfg.socks_user || '';
-                    proxyConfig.socks_pass = cfg.socks_pass || '';
-                    proxyConfig.dns = cfg.dns || '';
-                    proxyConfig.auto_enable = typeof cfg.auto_enable === 'boolean' ? cfg.auto_enable : proxyConfig.auto_enable;
-                    proxyConfig.uid = toNum(cfg.uid, proxyConfig.uid);
-                    proxyConfig.mark = toNum(cfg.mark, proxyConfig.mark);
-                    proxyConfig.table = toNum(cfg.table, proxyConfig.table);
-                    proxyConfig.tun_dev = cfg.tun_dev || proxyConfig.tun_dev;
-                    proxyConfig.tun_addr = cfg.tun_addr || proxyConfig.tun_addr;
-                };
-
-                const fetchProxyStatus = async () => {
-                    proxyStatusLoading.value = true;
-                    try {
-                        const res = await fetch('/admin/proxy/status', { headers: headers() });
-                        if (res.status === 403) {
-                            ElementPlus.ElMessage.error('密码错误或已过期');
-                            logout();
-                            return;
-                        }
-                        const data = await res.json();
-                        proxyStatus.enabled = !!data.enabled;
-                        proxyStatus.running = !!data.running;
-                        proxyStatus.tun_up = !!data.tun_up;
-                        proxyStatus.iptables_attached = !!data.iptables_attached;
-                        proxyStatus.policy_rule = !!data.policy_rule;
-                        proxyStatus.proxy_ip = data.proxy_ip || '';
-                        proxyStatus.message = data.message || '';
-                        proxyStatus.error = data.error || '';
-                        applyProxyConfig(data.config);
-                    } catch (e) {
-                        ElementPlus.ElMessage.error('加载代理状态失败: ' + e.message);
-                    } finally {
-                        proxyStatusLoading.value = false;
-                    }
-                };
-
-                const toggleProxy = async (enable) => {
-                    proxyLoading.value = true;
-                    try {
-                        const payload = {
-                            enable: enable === true,
-                            config: {
-                                socks_host: proxyConfig.socks_host,
-                                socks_port: Number(proxyConfig.socks_port) || proxyConfig.socks_port,
-                                socks_user: proxyConfig.socks_user,
-                                socks_pass: proxyConfig.socks_pass,
-                                dns: proxyConfig.dns,
-                                auto_enable: !!proxyConfig.auto_enable,
-                                uid: Number(proxyConfig.uid) || proxyConfig.uid,
-                                mark: Number(proxyConfig.mark) || proxyConfig.mark,
-                                table: Number(proxyConfig.table) || proxyConfig.table,
-                                tun_dev: proxyConfig.tun_dev,
-                                tun_addr: proxyConfig.tun_addr
-                            }
-                        };
-                        const res = await fetch('/admin/proxy/toggle', {
-                            method: 'POST',
-                            headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
-                            body: JSON.stringify(payload)
-                        });
-                        const text = await res.text();
-                        let data = {};
-                        try { data = JSON.parse(text); } catch (e) { data = { raw: text }; }
-                        if (!res.ok || data.error) {
-                            throw new Error(data.error || data.raw || res.statusText);
-                        }
-                        ElementPlus.ElMessage.success(enable ? '代理已启用' : '代理已关闭');
-                        await fetchProxyStatus();
-                    } catch (e) {
-                        ElementPlus.ElMessage.error('操作失败: ' + e.message);
-                    } finally {
-                        proxyLoading.value = false;
-                    }
                 };
 
                 // Rule Tester Logic
@@ -956,7 +721,6 @@
                     isAuthenticated, password, loading, login, logout,
                     currentView, drawerVisible, handleMenuSelect,
                     config, syncStatus, syncStatusMessages, fetchConfig,
-                    proxyConfig, proxyStatus, proxyLoading, proxyStatusLoading, fetchProxyStatus, toggleProxy,
                     saveDefaultBackend, saveRules,
                     jsonMode, rulesJson, editorVisible, editorTab, editingRule, openRuleEditor, confirmEditRule, deleteRule,
                     testReq, testResult, runTest,
