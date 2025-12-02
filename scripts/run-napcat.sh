@@ -5,6 +5,9 @@ set -euo pipefail
 export DISPLAY="${DISPLAY:-:1}"
 export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
 
+LOG_DIR="/home/user/logs"
+mkdir -p "${LOG_DIR}"
+
 # Prefer /app layout to match official images
 export HOME="/app"
 export XDG_CONFIG_HOME="/app/.config"
@@ -18,11 +21,11 @@ if [ -n "${PROXY_SOCKS5_HOST:-}" ] && [ -n "${PROXY_SOCKS5_PORT:-}" ]; then
   
   if [ -n "${PROXY_SOCKS5_USER:-}" ] && [ -n "${PROXY_SOCKS5_PASS:-}" ]; then
     # Authenticated SOCKS5 proxy
-    /home/user/gost -L ":${GOST_LOCAL_PORT}" -F "socks5://${PROXY_SOCKS5_USER}:${PROXY_SOCKS5_PASS}@${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}" &
+    /home/user/gost -L ":${GOST_LOCAL_PORT}" -F "socks5://${PROXY_SOCKS5_USER}:${PROXY_SOCKS5_PASS}@${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}" >> "${LOG_DIR}/gost.log" 2>&1 &
     echo "[napcat] gost forwarding to ${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT} (authenticated)"
   else
     # Non-authenticated SOCKS5 proxy
-    /home/user/gost -L ":${GOST_LOCAL_PORT}" -F "socks5://${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}" &
+    /home/user/gost -L ":${GOST_LOCAL_PORT}" -F "socks5://${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}" >> "${LOG_DIR}/gost.log" 2>&1 &
     echo "[napcat] gost forwarding to ${PROXY_SOCKS5_HOST}:${PROXY_SOCKS5_PORT}"
   fi
   

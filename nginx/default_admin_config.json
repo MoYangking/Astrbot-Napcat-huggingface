@@ -99,9 +99,9 @@
       "priority": 180
     },
     {
-      "match": { "path_prefix": "/terminal/" },
+      "match": { "path_prefix": "/t/" },
       "set_headers": [
-        { "value": "/terminal", "name": "X-Forwarded-Prefix" }
+        { "value": "/t", "name": "X-Forwarded-Prefix" }
       ],
       "backend": "http://127.0.0.1:8080",
       "action": "proxy",
