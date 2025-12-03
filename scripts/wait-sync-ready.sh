@@ -18,8 +18,6 @@ DEFAULT_TARGETS=(
   app/napcat/config/
   home/user/nginx/admin_config.json
   app/.config/QQ/
-  home/user/gemini-data/
-  home/user/gemini-balance-main/.env
 )
 
 log() { printf '[%s] [wait-sync] %s\n' "$(date '+%F %T')" "$*"; }

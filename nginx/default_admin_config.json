@@ -10,13 +10,6 @@
       "priority": 200
     },
     {
-      "match": { "referer_substr": "gemini" },
-      "backend": "http://127.0.0.1:8000",
-      "action": "proxy",
-      "id": "proxy-referer-gemini",
-      "priority": 195
-    },
-    {
       "match": { "referer_substr": "webui" },
       "backend": "http://127.0.0.1:6099",
       "action": "proxy",
@@ -48,30 +41,6 @@
       "priority": 180
     },
     {
-      "match": { "path_prefix": "/gemini/" },
-      "set_headers": [
-        { "value": "/gemini", "name": "X-Forwarded-Prefix" }
-      ],
-      "backend": "http://127.0.0.1:8000",
-      "action": "proxy",
-      "id": "proxy-gemini",
-      "priority": 180
-    },
-    {
-      "match": { "path_equal": "/gemini" },
-      "redirect_to": "/gemini/",
-      "action": "redirect",
-      "id": "redirect-gemini-slash",
-      "priority": 175
-    },
-    {
-      "match": { "path_prefix": "/gemini/" },
-      "backend": "http://127.0.0.1:8000",
-      "action": "proxy",
-      "id": "proxy-gemini",
-      "priority": 170
-    },
-    {
       "match": { "path_equal": "/sync" },
       "redirect_to": "/sync/",
       "action": "redirect",
@@ -88,7 +57,17 @@
       "id": "proxy-sync",
       "priority": 180
     }
-
+    ,
+    {
+      "match": { "path_prefix": "/filebrowser/" },
+      "set_headers": [
+        { "value": "/filebrowser", "name": "X-Forwarded-Prefix" }
+      ],
+      "backend": "http://127.0.0.1:8888",
+      "action": "proxy",
+      "id": "proxy-filebrowser",
+      "priority": 180
+    }
   ]
 }
 

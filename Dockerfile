@@ -80,19 +80,8 @@ RUN python3 -m venv "$VIRTUAL_ENV" && \
     "httpx>=0.25.0,<1.0.0" && \
     chown -R 1000:1000 "$VIRTUAL_ENV"
 
-# Clone and setup Gemini Balance service
-RUN git clone https://github.com/MoYangking/gemini-balance-main /home/user/gemini-balance-main && \
-    chown -R 1000:1000 /home/user/gemini-balance-main && \
-    uv pip install -r /home/user/gemini-balance-main/requirements.txt --no-cache-dir && \
-    chown -R 1000:1000 "$VIRTUAL_ENV"
-
-# Gemini persistent data dir
-RUN mkdir -p /home/user/gemini-data && chown -R 1000:1000 /home/user/gemini-data
-
-# Default env for Gemini (can be overridden at runtime)
-ENV DATABASE_TYPE=sqlite \
-    SQLITE_DATABASE=/home/user/gemini-data/gemini_balance.db \
-    TZ=Asia/Shanghai
+# Default timezone
+ENV TZ=Asia/Shanghai
 
 
 # NapCat AppImage: download latest release, extract and keep extracted tree
@@ -178,9 +167,6 @@ ENV PROXY_SOCKS5_HOST="" \
 
 # Optional: admin token for updating routes at runtime (used by Lua)
 ENV ROUTE_ADMIN_TOKEN=""
-
-# Control whether to start Gemini service (default: true)
-ENV ENABLE_GEMINI=true
 
 # Ensure OpenResty binaries present in PATH
 ENV PATH=/usr/local/openresty/bin:$PATH
