@@ -1,6 +1,6 @@
 {
   "admin_password": "admin",
-  "default_backend": "http://127.0.0.1:6185",
+  "default_backend": "http://127.0.0.1:5321",
   "rules": [
     {
       "match": { "path_prefix": "/api/ws/" },
