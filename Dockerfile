@@ -94,27 +94,27 @@ RUN LATEST_URL=$(curl -sL https://api.github.com/repos/NapNeko/NapCatAppImageBui
     mv squashfs-root /home/user/napcat && \
     chown -R 1000:1000 /home/user/napcat
 
-# Download and install FileBrowser (disabled)
-# RUN LATEST_URL=$(curl -sL https://api.github.com/repos/filebrowser/filebrowser/releases/latest | \
-#     jq -r '.assets[] | select(.name | contains("linux-amd64-filebrowser.tar.gz")) | .browser_download_url') && \
-#     curl -L -o /tmp/filebrowser.tar.gz "$LATEST_URL" && \
-#     tar -xzf /tmp/filebrowser.tar.gz -C /tmp && \
-#     mv /tmp/filebrowser /home/user/filebrowser && \
-#     chmod +x /home/user/filebrowser && \
-#     chown 1000:1000 /home/user/filebrowser && \
-#     rm -f /tmp/filebrowser.tar.gz && \
-#     mkdir -p /home/user/filebrowser-data && \
-#     chown -R 1000:1000 /home/user/filebrowser-data
+# Download and install FileBrowser
+RUN LATEST_URL=$(curl -sL https://api.github.com/repos/filebrowser/filebrowser/releases/latest | \
+    jq -r '.assets[] | select(.name | contains("linux-amd64-filebrowser.tar.gz")) | .browser_download_url') && \
+    curl -L -o /tmp/filebrowser.tar.gz "$LATEST_URL" && \
+    tar -xzf /tmp/filebrowser.tar.gz -C /tmp && \
+    mv /tmp/filebrowser /home/user/filebrowser && \
+    chmod +x /home/user/filebrowser && \
+    chown 1000:1000 /home/user/filebrowser && \
+    rm -f /tmp/filebrowser.tar.gz && \
+    mkdir -p /home/user/filebrowser-data && \
+    chown -R 1000:1000 /home/user/filebrowser-data
 
-# Download and install GoTTY (Web Terminal) (disabled)
-# RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releases/latest | \
-#     jq -r '.assets[] | select(.name | test("gotty_v.*_linux_amd64\\.tar\\.gz$")) | .browser_download_url') && \
-#     curl -L -o /tmp/gotty.tar.gz "$LATEST_URL" && \
-#     tar -xzf /tmp/gotty.tar.gz -C /tmp && \
-#     mv /tmp/gotty /home/user/gotty && \
-#     chmod +x /home/user/gotty && \
-#     chown 1000:1000 /home/user/gotty && \
-#     rm -f /tmp/gotty.tar.gz
+# Download and install GoTTY (Web Terminal)
+RUN LATEST_URL=$(curl -sL https://api.github.com/repos/sorenisanerd/gotty/releases/latest | \
+    jq -r '.assets[] | select(.name | test("gotty_v.*_linux_amd64\\.tar\\.gz$")) | .browser_download_url') && \
+    curl -L -o /tmp/gotty.tar.gz "$LATEST_URL" && \
+    tar -xzf /tmp/gotty.tar.gz -C /tmp && \
+    mv /tmp/gotty /home/user/gotty && \
+    chmod +x /home/user/gotty && \
+    chown 1000:1000 /home/user/gotty && \
+    rm -f /tmp/gotty.tar.gz
 
 RUN set -eux; \
     GOST_VERSION=2.11.5; \

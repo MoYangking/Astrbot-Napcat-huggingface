@@ -57,8 +57,7 @@
       "id": "proxy-sync",
       "priority": 180
     }
-  ],
-  "_disabled_rules": [
+    ,
     {
       "match": { "path_prefix": "/filebrowser/" },
       "set_headers": [
