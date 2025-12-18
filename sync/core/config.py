@@ -29,7 +29,7 @@ DEFAULT_TARGETS = (
                 "app/napcat/config/",
                 "home/user/nginx/admin_config.json",
                 "app/.config/QQ/",
-                "home/user/filebrowser-data/filebrowser.db",
+                # "home/user/filebrowser-data/filebrowser.db",
             ]
         ),
     )

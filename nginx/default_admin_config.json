@@ -1,6 +1,6 @@
 {
   "admin_password": "admin",
-  "default_backend": "http://127.0.0.1:5321",
+  "default_backend": "http://127.0.0.1:6099",
   "rules": [
     {
       "match": { "path_prefix": "/api/ws/" },
@@ -57,7 +57,8 @@
       "id": "proxy-sync",
       "priority": 180
     }
-    ,
+  ],
+  "_disabled_rules": [
     {
       "match": { "path_prefix": "/filebrowser/" },
       "set_headers": [
